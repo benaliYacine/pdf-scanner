@@ -4354,7 +4354,7 @@ class RestartThread(QThread):
         'B26': 'NONE',
         'B27': 'NONE',
         'B28': 'NONE',
-        'B29': 'NONE',
+        # 'B29': 'NONE',
         # 'B30': 'NONE',
         # 'B31': 'NONE',
         # 'B32': 'NONE',
@@ -4740,7 +4740,7 @@ class UpdateThread(QThread):
  'B71': self.app.line_editB71,
  'B28': self.app.line_editB28,
  'B72': self.app.line_editB72,
- 'B29': self.app.line_editB29,
+#  'B29': self.app.line_editB29,
  'B17': self.app.line_editB17,
  'B73': self.app.line_editB73,
 #  'B30': self.app.line_editB30,
@@ -4948,7 +4948,7 @@ class UpdateThread(QThread):
         'B26': 'NONE',
         'B27': 'NONE',
         'B28': 'NONE',
-        'B29': 'NONE',
+        # 'B29': 'NONE',
         # 'B30': 'NONE',
         # 'B31': 'NONE',
         # 'B32': 'NONE',
@@ -6390,6 +6390,11 @@ QLabel { background-color: orange;
         RISK.addWidget(self.line_editF20,1)
         PAIN = QHBoxLayout()
         self.line_editH20 = QLineEdit(self)
+        self.line_editH20.setStyleSheet("""
+QLineEdit { background-color: purple;
+          }
+""")
+
         self.line_editH20.setFont(line_edit_font)
         self.line_editH20.setMaximumWidth(150)
         self.painJ20 = QComboBox()
@@ -6587,8 +6592,9 @@ QLineEdit { background-color: #aaa;
         self.line_editB27.setFont(line_edit_font)
         self.line_editB27.setMaximumWidth(350)
         self.line_editB27.setStyleSheet("""
-QLineEdit { background-color: #aaa;
-    }
+QLineEdit { background-color: #497b5a;
+            color:red;
+          }
 """)
         row = QHBoxLayout()
         row.addWidget(self.line_editB70,1)

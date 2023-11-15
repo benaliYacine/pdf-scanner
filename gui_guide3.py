@@ -10,6 +10,7 @@ from fuzzywuzzy import fuzz #You're trying to find the location of a phrase in a
 import fitz
 import os
 import re
+import resources_rc
 
 # default fcts nafshom ta3 l page 10
 def pdf_to_image(pdf_path,page):
@@ -5908,6 +5909,10 @@ class FocusLineEdit(QLineEdit):
             if self.next_widget:
                 self.next_widget.setFocus()  # Set focus to the next widget
 
+class WheelIgnoredComboBox(QComboBox):
+    def wheelEvent(self, event):
+        event.ignore()
+
 class App(QWidget):
 
     def __init__(self):
@@ -5964,7 +5969,7 @@ class App(QWidget):
         # POC TYPE ComboBox
 
 
-        self.poc_typeC2 = QComboBox()
+        self.poc_typeC2 = WheelIgnoredComboBox()
         self.poc_typeC2.setMaximumWidth(MAX_WIDTH)
         self.poc_typeC2.addItems(['SOC', 'Recert', 'ROC'])
         drob = QHBoxLayout()
@@ -6017,14 +6022,14 @@ QLabel { background-color: orange;
 
         # Musculoskeletal ComboBox
         
-        self.templateA5 = QComboBox()
+        self.templateA5 = WheelIgnoredComboBox()
         self.templateA5.setMaximumWidth(MAX_WIDTH)
         self.templateA5.addItems(['BASIC', 'DM', 'DM/INSULIN', 'CHF', 'CHF/COPD', 'DM/CHF/COPD', 'DM/COPD', 'DM/CHF', 'DM/COPD', 'COPD/DM/INSULIN', 'CHF/DM/INSULIN', 'CHF/COPD & DM/INSULIN', 'COPD/O2'])
         
-        self.musculoskeletalE5 = QComboBox()
+        self.musculoskeletalE5 = WheelIgnoredComboBox()
         self.musculoskeletalE5.setMaximumWidth(MAX_WIDTH)
         self.musculoskeletalE5.addItems(['$$$Musculoskeletal', '$$$Osteoarthritis', '$$$Arthropathies'])
-        self.hypertensionH5 = QComboBox()
+        self.hypertensionH5 = WheelIgnoredComboBox()
         self.hypertensionH5.setMaximumWidth(MAX_WIDTH)
         self.hypertensionH5.addItems(['$$$Hypertensive heart', '$$$Normal BP', 'NONE'])
         row = QHBoxLayout()
@@ -6080,7 +6085,7 @@ QLabel { background-color: orange;
 
 
 
-        self.snv_frequencyB8 = QComboBox()
+        self.snv_frequencyB8 = WheelIgnoredComboBox()
         self.snv_frequencyB8.setMaximumWidth(MAX_WIDTH)
         self.snv_frequencyB8.addItems(['2wx2, 1wx7', '1wx1, 2wx2, 1wx6', '2wx1, 1wx8', '1wx1, 2wx1, 1wx7', 'Once a Day x 10 Days, 1wx7'])
         self.line_editE8 = QLineEdit(self)
@@ -6145,7 +6150,7 @@ QLabel { background-color: orange;
         form_layout.addRow(row)
 
 
-        self.pt_or_notB11 = QComboBox()
+        self.pt_or_notB11 = WheelIgnoredComboBox()
         self.pt_or_notB11.setMaximumWidth(MAX_WIDTH)
         self.pt_or_notB11.addItems(['NONE', 'PT', 'OT', 'PT&OT', 'CHHA PT&CHHA', 'OT&CHHA', 'PT, OT, &CHHA'])
         self.line_editE11 = QLineEdit(self)
@@ -6154,7 +6159,7 @@ QLabel { background-color: orange;
         row = QHBoxLayout()
         row.addWidget(self.pt_or_notB11, 1)  # Stretch factor of 1
         row.addWidget(self.line_editE11, 1)          # Stretch factor of 1
-        self.directiveJ11 = QComboBox()
+        self.directiveJ11 = WheelIgnoredComboBox()
         self.directiveJ11.setMaximumWidth(100)
         self.directiveJ11.addItems(['DNR', 'CPR', 'POWER OF ATTORNEY', 'DNI', 'LIVING WILL', 'NO ARTFICIAL NUTRITION AND HYDRATION'])
         self.line_editH11 = QLineEdit(self)
@@ -6194,7 +6199,7 @@ QLabel { background-color: orange;
         self.line_editI13 = QLineEdit(self)
         self.line_editI13.setFont(line_edit_font)
         self.line_editI13.setMaximumWidth(65)
-        self.visionJ13 = QComboBox()
+        self.visionJ13 = WheelIgnoredComboBox()
         self.visionJ13.setMaximumWidth(65)
         self.visionJ13.addItems(['ADEQUATE VISION', 'IMPAIRED VISION', 'MODERATLY IMPAIRED VISION', 'HIGHLY IMPAIRED VISION', 'SEVERELY IMPAIRED VISION'])
         VISION.addWidget(label3,1)
@@ -6208,7 +6213,7 @@ QLabel { background-color: orange;
 
 
 
-        self.priority_codeB14 = QComboBox()
+        self.priority_codeB14 = WheelIgnoredComboBox()
         self.priority_codeB14.setMaximumWidth(MAX_WIDTH)
         self.priority_codeB14.addItems(['1 [HIGH]', '2.0', '3 [LOW]'])
         RISK = QHBoxLayout()
@@ -6229,7 +6234,7 @@ QLabel { background-color: orange;
         self.line_editI14 = QLineEdit(self)
         self.line_editI14.setFont(line_edit_font)
         self.line_editI14.setMaximumWidth(65)
-        self.hearingJ14 = QComboBox()
+        self.hearingJ14 = WheelIgnoredComboBox()
         self.hearingJ14.setMaximumWidth(65)
         self.hearingJ14.addItems(['MINIMAL', 'ADEQUATE', 'MODERATLY IMPAIRED HEARING DIFFICULTY IN BILATERAL EARS', 'UNABLE TO ASSESS HEARING', 'HIGHLY IMPAIRED'])
         HEARING.addWidget(label1,1)
@@ -6376,7 +6381,7 @@ QLabel { background-color: orange;
 
 
 
-        self.copd_asthmaB20 = QComboBox()
+        self.copd_asthmaB20 = WheelIgnoredComboBox()
         self.copd_asthmaB20.setMaximumWidth(MAX_WIDTH)
         self.copd_asthmaB20.addItems(['COPD', 'Asthma'])
         RISK = QHBoxLayout()
@@ -6397,7 +6402,7 @@ QLineEdit { background-color: purple;
 
         self.line_editH20.setFont(line_edit_font)
         self.line_editH20.setMaximumWidth(150)
-        self.painJ20 = QComboBox()
+        self.painJ20 = WheelIgnoredComboBox()
         self.painJ20.setMaximumWidth(66)
         self.painJ20.addItems(['DAILY', 'LESS OFTEN THAN DAILY ', 'ALL OF THE TIME ', 'NO'])
         PAIN.addWidget(self.line_editH20,1)
@@ -6954,14 +6959,14 @@ QLineEdit { background-color: yellow;
 """)
             
             if i==39:
-                self.line_editI39 = QComboBox()
+                self.line_editI39 = WheelIgnoredComboBox()
                 self.line_editI39.addItems(['Inadequate', 'Adequate', 'NONE'])
                 self.line_editI39.setStyleSheet("""
 QComboBox { background-color: yellow;
     }
 """)
             elif i==40:
-                self.line_editI40 = QComboBox()
+                self.line_editI40 = WheelIgnoredComboBox()
                 self.line_editI40.addItems(['Inadequate', 'Adequate', 'NONE'])
             else:
 
@@ -7014,7 +7019,7 @@ QLabel { background-color: orange;
 
 
 
-        self.dietF50 = QComboBox()
+        self.dietF50 = WheelIgnoredComboBox()
         self.dietF50.addItems(['regular diet', 'NAS diet', 'low fat and low cholesterol diet', 'NAS, low fat, and low cholesterol diet', 'NAS, NCS, low fat, low cholesterol, and controlled carbohydrate diet', 'NAS, low fat, low cholesterol, and controlled carbohydrate diet', 'controlled carbohydrate diet', 'NAS, low fat, low acid, and low cholesterol diet', 'low acid diet', 'NAS, low acid, low fat, low cholesterol, and controlled carbohydrate diet', 'NAS and heart healthy diet', 'controlled carbohydrate diet', 'NAS, NCS, low fat, low cholesterol, high fiber, renal, and controlled carbohydrate diet'])
         row = QHBoxLayout()
         row.addWidget(self.dietF50,1)
@@ -7051,7 +7056,7 @@ QLabel { background-color: orange;
         self.line_editB53 = QLineEdit(self)
         self.line_editB53.setFont(line_edit_font)
         self.line_editB53.setMaximumWidth(200)
-        self.incontinanceF53 = QComboBox()
+        self.incontinanceF53 = WheelIgnoredComboBox()
         self.incontinanceF53.setMaximumWidth(200)
         self.incontinanceF53.addItems(['Incontinent', 'No Incontinance'])
         DME = QHBoxLayout()
@@ -7299,7 +7304,7 @@ QLabel { background-color: red;
 
 
 
-        self.edemaB62 = QComboBox()
+        self.edemaB62 = WheelIgnoredComboBox()
         self.edemaB62.setMaximumWidth(200)
         self.edemaB62.addItems([None,'+1', '+2', '+3', '+4', 'non-pitting', 'localized', 'localized non-pitting', 'localized +1', 'localized +2', 'localized +3', 'localized +4'])
         label1 = QLabel("")
@@ -7350,7 +7355,7 @@ QLabel { background-color: red;
 
 
 
-        self.sopB65 = QComboBox()
+        self.sopB65 = WheelIgnoredComboBox()
         self.sopB65.setMaximumWidth(200)
         self.sopB65.addItems(['Moderate', 'Minimal', '20 feet', 'NONE', 'At rest'])
         self.line_editF65 = QLineEdit(self)
@@ -7673,7 +7678,7 @@ QLabel { background-color: orange;
         self.line_editB101 = QLineEdit(self)
         
         self.line_editB101.setFont(line_edit_font)
-        self.typeG101 = QComboBox()
+        self.typeG101 = WheelIgnoredComboBox()
         self.typeG101.addItems(['Syringe', 'Pen'])
         row = QHBoxLayout()
         row.addWidget(self.line_editB101,1)
@@ -7709,7 +7714,7 @@ QLabel { background-color: purple;
 
         label1 = QLabel("                 ")
         label2 = QLabel("                 ")
-        self.cmF105 = QComboBox()
+        self.cmF105 = WheelIgnoredComboBox()
         self.cmF105.setMaximumWidth(130)
         self.cmF105.addItems(['cm', 'in'])
         self.cmF105.setStyleSheet("""
@@ -8175,10 +8180,10 @@ QLabel { background-color: orange;
         self.line_editE122 = QLineEdit(self)
         self.line_editE122.setFont(line_edit_font)
         self.line_editE122.setMaximumWidth(135)
-        self.SHUNTtypeG122 = QComboBox()
+        self.SHUNTtypeG122 = WheelIgnoredComboBox()
         self.SHUNTtypeG122.setMaximumWidth(135)
         self.SHUNTtypeG122.addItems(['SHUNT', 'Catheter'])
-        self.SHUNTlocaI122 = QComboBox()
+        self.SHUNTlocaI122 = WheelIgnoredComboBox()
         self.SHUNTlocaI122.setMaximumWidth(135)
         self.SHUNTlocaI122.addItems(['left', 'right'])
         row = QHBoxLayout()
@@ -8341,6 +8346,12 @@ QLabel { background-color: purple;
         form_layout.addRow(row)
 
 
+        label1 = QLabel("")
+        row = QHBoxLayout()
+        row.addWidget(label1,1)
+        form_layout.addRow(row)
+
+
 
         label1 = QLabel("")
         label2 = QLabel("NON-PITTING")
@@ -8442,7 +8453,7 @@ QLabel { background-color: orange;
 
 
 
-        self.edemaB147 = QComboBox()
+        self.edemaB147 = WheelIgnoredComboBox()
         self.edemaB147.setMaximumWidth(100)
         self.edemaB147.addItems(['Normal', 'Localized'])
         self.edemaB147.setStyleSheet("""
@@ -8458,6 +8469,27 @@ QComboBox { background-color: yellow;
         row = QHBoxLayout()
         row.addWidget(label1,1)
         form_layout.addRow(row)
+
+
+        
+        label1 = QLabel("BREATH SOUNDS")
+        label1.setAlignment(Qt.AlignCenter)
+        label1.setStyleSheet("""
+QLabel { background-color: purple;
+         color: white;
+         font-size: 16px;
+         font-weight: bold; }
+""")
+        row = QHBoxLayout()
+        row.addWidget(label1,1)
+        form_layout.addRow(row)
+
+
+        label1 = QLabel("")
+        row = QHBoxLayout()
+        row.addWidget(label1,1)
+        form_layout.addRow(row)
+
 
 
 
@@ -8734,7 +8766,7 @@ QLabel { background-color: orange;
             }
 
             QComboBox::down-arrow {
-                image: url(arrow.png); /* Replace with your own image */
+                image: url(:/arrow.png); /* Replace with your own image */
                 width: 10px; /* or any size that fits well in your combo box */
                 height: 10px;
                 border-radius: 5px;

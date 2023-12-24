@@ -8,58 +8,10 @@ from openpyxl import load_workbook
 import xlwings as xw
 from fuzzywuzzy import fuzz #You're trying to find the location of a phrase in an image using OCR (Optical Character Recognition) with the pytesseract library. Due to the inaccuracies in OCR, you may get slightly incorrect readings of the phrase. One way to handle this is to use fuzzy string matching to detect phrases that are "close enough" to the target phrase.
 from math import atan2, degrees
-import os
-import tempfile
-from io import BytesIO
-import PyPDF2
-import fitz
 
-def pdf_to_image(pdf_path, page, zoom=200 / 72):
-    # Load the PDF
-    doc = fitz.open(pdf_path)
-    
-    # Get the desired page
-    page = doc.load_page(page - 1)
-    
-    # Create a matrix for zooming
-    mat = fitz.Matrix(zoom, zoom)
-    
-    # Get the pixmap using the matrix for higher resolution
-    pix = page.get_pixmap(matrix=mat)
-
-    if pix.alpha:
-        image_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, 4)  # RGBA
-    else:
-        image_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, 3)  # RGB
-    
-    return image_np
-
-def pdf_to_image_test(pdf_path,page):
-    """
-    Flatten the input PDF and convert a given page to an image.
-    """
-    # Read the PDF
-    with open(pdf_path, "rb") as input_file:
-        reader = PyPDF2.PdfReader(input_file)
-        writer = PyPDF2.PdfWriter()
-
-        # Flatten the 10th page
-        page_content = reader.pages[9]  # 0-based index, so 9 refers to the 10th page
-        page_content.merge_page(page_content)
-        writer.add_page(page_content)
-        
-        # Save the flattened content to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-            writer.write(temp_file)
-            temp_file_path = temp_file.name
-        
-    # Convert the temporary PDF to an image
-    images = convert_from_path(temp_file_path)
-    
-    # Optionally: remove the temporary file
-    os.remove(temp_file_path)
-    
-    return np.array(images[0])
+def pdf_to_image(pdf_path,page):
+    images = convert_from_path(pdf_path)
+    return np.array(images[page-1])
 
 def correct_skew(image):
     print('start tilt correc')
@@ -102,7 +54,7 @@ def preprocess_image(image_org,ratio):
     gray = cv2.cvtColor(image_org, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, ratio, 255, cv2.THRESH_BINARY)
     return thresh
-#page5
+
 def detect_checkboxes(thresh,img):
     output = img.copy()
     contours, hierarchy = cv2.findContours(thresh, 1, 2)
@@ -114,8 +66,8 @@ def detect_checkboxes(thresh,img):
             x, y, w, h = cv2.boundingRect(cnt)
             ratio = float(w)/h
             #********************************************************************************************
-            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1070 and y<1320:  # Check if side length is at least 18 pixels
-                # print(y)
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y<800:  # Check if side length is at least 18 pixels
+                print(y)
                 bounding_boxes.append((x, y, w, h))
 
     # Filter boxes based on distance
@@ -123,8 +75,8 @@ def detect_checkboxes(thresh,img):
     while bounding_boxes:
         box = bounding_boxes.pop(0)
         keep = True
-        for Cancer_box in bounding_boxes:
-            if distance(box, Cancer_box) < 20:
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
                 keep = False
                 break
         if keep:
@@ -145,44 +97,7 @@ def detect_checkboxes(thresh,img):
         squares.append((center_x, center_y, diameter))
     
     return output, squares
-#page5
-def detect_checkboxes2(thresh,img):
-    output = img.copy()
-    contours, hierarchy = cv2.findContours(thresh, 1, 2)
 
-    bounding_boxes = []
-    for cnt in contours:
-        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
-        if len(approx) == 4:
-            x, y, w, h = cv2.boundingRect(cnt)
-            # w >= 20 and w <= 200 and h >= 43 and h <= 48
-            # w >= 68 and w <= 74 and h >= 44 and h <= 50
-            #********************************************************************************************
-            if  w >= 100 and w <= 200 and h >= 30 and h <= 70 and y>1850:  # Check if side length is at least 18 pixels
-                # print( w, h, y)
-                bounding_boxes.append((x, y, w, h))
-
-    # Filter boxes based on distance
-    filtered_boxes = []
-    while bounding_boxes:
-        box = bounding_boxes.pop(0)
-        keep = True
-        for other_box in bounding_boxes:
-            if distance(box, other_box) < 50:
-                keep = False
-                break
-        if keep:
-            filtered_boxes.append(box)
-
-    # Draw the filtered boxes on the image
-    for box in filtered_boxes:
-        x, y, w, h = box
-        # print(w,h,y,'hhh')
-        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
-
-
-    return output, filtered_boxes
-#page5
 def detect_radio_buttons(thresh, image_org):
     circles = cv2.HoughCircles(
         # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
@@ -194,16 +109,13 @@ def detect_radio_buttons(thresh, image_org):
     output = image_org.copy()
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
-        filtered_circles=[]
+
         for i in range(circles.shape[0]):
-            
             #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
             x, y, r = circles[i]
-            if y>1180 and y<1320:
-                filtered_circles.append((x, y, 10))
-            # circles[i] = (x, y, 10)
-                cv2.circle(output, (x, y), r, (0, 255, 0), 2)
-    return output, filtered_circles
+            circles[i] = (x, y, 10)
+            cv2.circle(output, (x, y), r, (0, 255, 0), 2)
+    return output, circles
 
 def detect_filled_button(thresh, circles,image_org, filled_threshold_ratio):
     output = image_org.copy()
@@ -219,10 +131,11 @@ def detect_filled_button(thresh, circles,image_org, filled_threshold_ratio):
             filled_buttons.append((x, y, r))
 
     return filled_buttons,output
-#page5
+
 def detect_word_location(img, word, length, threshold=80):
     # Crop the image based on the specified y-axis values
-    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    cropped_img = img[850:, :]
+    hocr_data = pytesseract.image_to_pdf_or_hocr(cropped_img, extension='hocr').decode('utf-8')
     bounding_boxes = []
 
     for line in hocr_data.splitlines():
@@ -230,29 +143,8 @@ def detect_word_location(img, word, length, threshold=80):
         if fuzz.partial_ratio(line, word) >= threshold:
             # print(line)
             x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
-            x1, y1, x2, y2 = int(x1)-r, int(y1), int(x2)+r, int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
-            if y1<600:
-                # print(y1)
-                bounding_boxes.append((x2+47, y1-5, x2+47+length, y2))
-
-    return bounding_boxes
-
-def detect_word_location2(img, word, length, threshold=75):
-    # Crop the image based on the specified y-axis values
-    # cropped_img = img[850:, :]
-    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
-    bounding_boxes = []
-    first=True
-    for line in hocr_data.splitlines():
-        r = 4
-        if fuzz.partial_ratio(line, word) >= threshold :
-            if first:
-                first=False
-            else:
-                # print(line)
-                x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
-                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
-                bounding_boxes.append((x2+94, y1-7, x2+length, y2))
+            x1, y1, x2, y2 = int(x1)-r, int(y1)+850, int(x2)+r, int(y2)+850#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            bounding_boxes.append((x1+92, y1, x1+92+length, y2))
 
     return bounding_boxes
 
@@ -303,7 +195,7 @@ def detect_phrase_location(img, phrase, length, threshold=85):
 
             if all_words_found:
                 x1,y1,x2,y2=current_box
-                current_box=(x2, y1-7, x2+length, y2)#kima dert m3a Cancer welit nehseb l x2 men x1 w nzid valeur kima hna 161 parceque l x2 wlat taghlat 
+                current_box=(x1+168, y1-7, x1+168+length, y2)#kima dert m3a Other welit nehseb l x2 men x1 w nzid valeur kima hna 161 parceque l x2 wlat taghlat 
                 bounding_boxes.append(tuple(current_box))
         i += 1
 
@@ -351,13 +243,22 @@ def detect_phrase_location_old_method(img,phrase,length):
 def extract_text_roi(image_org, filled_buttons,x_ratio,y_ratio):
     output = image_org.copy()
     rois_coordinates=[]
-    for x, y, r in filled_buttons:#ani dayerha twila bezaf lakhaterch ocr ye9ra ri lkelma lewla li le9raha tema
-        roi_x_start = x + r+5#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/8/2023
-        roi_x_end = x + x_ratio * r  # This can be adjusted based on expected text length
+    for x, y, r in filled_buttons:
+        roi_x_start = x + r+55
+        roi_x_end = x + x_ratio * r  
         roi_y_start = y - r- y_ratio
         roi_y_end = y + r+ y_ratio
         cv2.rectangle(output, (roi_x_start, roi_y_start), (roi_x_end, roi_y_end), (0, 0, 255), 2)
         rois_coordinates.append((roi_x_start, roi_y_start, roi_x_end, roi_y_end))
+
+        #numero 6 
+        roi_x_start = roi_x_start 
+        roi_x_end = roi_x_end 
+        roi_y_start = roi_y_start - 15
+        roi_y_end = roi_y_end - 15
+        cv2.rectangle(output, (roi_x_start, roi_y_start), (roi_x_end, roi_y_end), (0, 100, 100), 2)
+        rois_coordinates.append((roi_x_start, roi_y_start, roi_x_end, roi_y_end))
+
     return output, rois_coordinates
 
 def extract_text_from_roi_checks(image_org, roi_coordinates):
@@ -365,6 +266,19 @@ def extract_text_from_roi_checks(image_org, roi_coordinates):
     for roi_x_start, roi_y_start, roi_x_end, roi_y_end in roi_coordinates :
         roi_image = image_org[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
         text = pytesseract.image_to_string(roi_image, config='--psm 6').strip()  
+        #ida kanet l kelma no wela yes n3amro dictionaire detected_yes_no
+        first_word=text.split(' ')[0]# Extracting the first word
+        if not(first_word=='Inability' and 'cope'==text.split(' ')[2]):
+            detected_options.append(first_word)
+    print('detected_options: ',detected_options)
+    return detected_options
+
+def extract_number_from_roi_checks(image_org, roi_coordinates):
+    detected_options=[]
+    for roi_x_start, roi_y_start, roi_x_end, roi_y_end in roi_coordinates :
+        roi_image = image_org[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+        text = pytesseract.image_to_string(roi_image, config='--psm 6 outputbase digits').strip() 
+
         #ida kanet l kelma no wela yes n3amro dictionaire detected_yes_no
         first_word=text.split(' ')[0]# Extracting the first word
         if not(first_word=='Inability' and 'cope'==text.split(' ')[2]):
@@ -406,14 +320,11 @@ def extract_text_from_roi_radios(image_org, roi_coordinates):
 def extract_text_from_roi(image_org, roi_coordinate):
     roi_x_start, roi_y_start, roi_x_end, roi_y_end = roi_coordinate 
     roi_image = image_org[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
-    # denoised = cv2.fastNlMeansDenoisingColored(roi_image, None,1, 1, 7, 21)
+    denoised = cv2.fastNlMeansDenoisingColored(roi_image, None,1, 1, 7, 21)
     # Image.fromarray(denoised).show()
-    
-    text = pytesseract.image_to_string(roi_image).strip()
-    
-    # text = pytesseract.image_to_string(roi_image, config='--psm 6 -c tessedit_char_blacklist=.-+_,|;:').strip()
+    text = pytesseract.image_to_string(denoised, config='--psm 6').strip()
     return text
-#page5
+
 def validate_option(detected_text, options, threshold=80):
     validated_options = []
 
@@ -421,8 +332,6 @@ def validate_option(detected_text, options, threshold=80):
         for option in options:
             # Using token sort ratio to handle out of order issues and partial matches
             if fuzz.token_sort_ratio(text, option.split()[0]) > threshold:
-                if option=="Ist":
-                    option='1st'
                 validated_options.append(option)
 
     if len(validated_options) == 0:
@@ -488,34 +397,50 @@ def join_strings(string_list):
         return " and ".join(string_list)
     return ", ".join(string_list[:-1]) + ", and " + string_list[-1]
 
-def transform_date(date_str):
-    try:
-        month, day, year = date_str.split('/')
-        
-        # Pad day and month with 0 if they are single digit
-        if len(month) == 1:
-            month = '0' + month
-        if len(day) == 1:
-            day = '0' + day
-        
-        # Convert two-digit year to four digits
-        year = '20' + year
-        
-        # Join the elements with a period
-        transformed_date = f"{month}.{day}.{year}"
-    except:
-        print("Unable to read the date. This may be because the field is empty or the date is not in the 'Month/Day/Year' format.")
-        return ''
-    return transformed_date
-#page5
+# page 22 methods
+def filter_numbers(detected_list):
+    # Create a list of numbers 1-9 in various formats
+    numbers = [str(i) for i in range(1, 10)]
+    numbers_with_period = [str(i) + '.' for i in range(1, 10)]
+    numbers_with_comma_space = [str(i) + ',' for i in range(1, 10)]
+
+    # Combine all the formats into one list
+    all_valid_formats = numbers + numbers_with_period + numbers_with_comma_space
+
+    # Filter the list, remove comma or point if they exist, and ensure no duplicates
+    filtered_list = []
+    for item in detected_list:
+        cleaned_item = item.replace('.', '').replace(',', '')
+        if item in all_valid_formats and cleaned_item not in filtered_list:
+            filtered_list.append(cleaned_item)
+
+    return filtered_list
+
+def map_numbers_to_cells(filtered_numbers):
+    # Mapping of numbers to Excel cells
+    number_to_cell_map = {
+        '1': 'F14',
+        '2': 'F15',
+        '3': 'F16',
+        '4': 'F17',
+        '5': 'F18',
+        '6': 'F19',
+        '7': 'F20',
+        '8': 'F21',
+        '9': 'F22'   
+        }
+    
+    # Create a dictionary with cell address as key and number (without dot) as value
+    excel_inputs = {number_to_cell_map[num]: num for num in filtered_numbers}
+    return excel_inputs
+
 if __name__ == "__main__":
     start_time = time.time()
-    # pdf_path = ('BAD_QUALITY_2.pdf')
-    # for pdf_path in ['BAD_QUALITY_2.pdf','BAD_QUALITY_3.pdf','BAD_QUALITY.pdf','FILLABLES_2.pdf','FILLABLES_3.pdf','FILLABLES_4.pdf','FILLABLES_5.pdf','FILLABLES_6.pdf','FOR_UPWORK_#1.pdf','FOR_UPWORK_#2.pdf','FOR_UPWORK_#3.pdf','FOR_UPWORK_#4.pdf','HIGH_QUALITY_2.pdf','HIGH_QUALITY_3.pdf','HIGH_QUALITY.pdf','MEDIUM_QUALITY.pdf']:
-    for pdf_path in ['FILLABLE-9.pdf','FOR_UPWORK_#2.pdf','FOR_UPWORK_#3.pdf','FOR_UPWORK_#4.pdf','HIGH_QUALITY_2.pdf','HIGH_QUALITY_3.pdf','HIGH_QUALITY.pdf','MEDIUM_QUALITY.pdf'] :
+    for pdf_path in ['BAD_QUALITY_3.pdf','BAD_QUALITY.pdf','FILLABLES_2.pdf','FILLABLES_3.pdf','FILLABLES_4.pdf','FILLABLES_5.pdf','FILLABLES_6.pdf','FOR_UPWORK_#1.pdf','FOR_UPWORK_#2.pdf','FOR_UPWORK_#3.pdf','FOR_UPWORK_#4.pdf','HIGH_QUALITY_2.pdf','HIGH_QUALITY_3.pdf','HIGH_QUALITY.pdf','MEDIUM_QUALITY.pdf']:
+        
         print(pdf_path)
         excel_path = ('WORKING.xlsm')
-        page=5
+        page=22
         noise=False# khalih daymen cha3el ynahi hadouk l ahrof random li yekhorjou ki detcti text fi blasa vide (bayda)
         plure=False
         skewed=True
@@ -523,8 +448,9 @@ if __name__ == "__main__":
             noise=True# khalih daymen cha3el ynahi hadouk l ahrof random li yekhorjou ki detcti text fi blasa vide (bayda)
             plure=True
             skewed=True
-        elif pdf_path=='HIGH_QUALITY_3.pdf' or pdf_path=='BAD_QUALITY_3.pdf' :
+        elif pdf_path=='HIGH_QUALITY_3.pdf':
             skewed=True
+
         #***********************************valus that can be tweaked************************************************
         #ratio ta3 dettection ta3 les radio buttons w check boxes modifier 3liha
         thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
@@ -533,18 +459,18 @@ if __name__ == "__main__":
         filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
         filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
         #ratio ta3 tol w 3ard el ROIs ta3 koul button
-        x_check_ratio=30
-        y_check_ratio=6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        x_check_ratio=14
+        y_check_ratio=5#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
 
-        x_radio_ratio=10
-        y_radio_ratio=6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        x_radio_ratio=21
+        y_radio_ratio=5#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
         image_org = pdf_to_image(pdf_path,page)
-        # Image.fromarray(image_org).show()
+        Image.fromarray(image_org).show()
         #kayen des pdf ki mscanyiin mayliin 
         if skewed:
             corrected = correct_skew(image_org)
             image_org=corrected
-            # Image.fromarray(corrected).show()
+            Image.fromarray(corrected).show()
 
 
         #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
@@ -552,7 +478,7 @@ if __name__ == "__main__":
         if noise:
             denoised = cv2.fastNlMeansDenoisingColored(image_org, None, 10, 10, 7, 21)
             image_org=denoised
-            # Image.fromarray(denoised).show()
+            Image.fromarray(denoised).show()
         
         #+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
         # # # 4. Sharpening    hadi method khdokhra bach dir charpning besah masa3detnich li rani nekhdem biha dork khir hadi dir charpening 9awi bezaf li rani nekhdem biha 3la hsab ra9m li dirou 
@@ -567,116 +493,44 @@ if __name__ == "__main__":
 
             # Sharpen the image
             enhancer = ImageEnhance.Sharpness(image_org_pil)
-            image_sharpened_pil = enhancer.enhance(4.0)  #3.0 hiya li kanet temchi men 9bel # 4.0 is the enhancement factor; higher values mean more sharpening
+            image_sharpened_pil = enhancer.enhance(10.0)  #3.0 hiya li kanet temchi men 9bel # 4.0 is the enhancement factor; higher values mean more sharpening
 
             # Convert the PIL image back to a numpy array for visualization
             sharpened = np.array(image_sharpened_pil)
             image_org=sharpened
-            # Image.fromarray(sharpened).show()
+            Image.fromarray(sharpened).show()
 
         #hna ki kout ndiir bezaf sharpening kan ykhorjou des trace noire fel blayes elboyed tema ki n detecti text fi blasa vide yehseb kayen text tema ,tema seyit ndir denoise pour une dexieme fois bach enahi hadouk kes traces
         # denoised = cv2.fastNlMeansDenoisingColored(image_org, None, 10, 10, 7, 21)
         # image_org=denoised
-        output_image=image_org.copy()
+        output_image=image_org
 
         #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-        thresh_check = preprocess_image(output_image,thresh_check_ratio)
-        thresh_radio = preprocess_image(output_image,thresh_radio_ratio)
+        excel_inputs={}
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+
 
         output_image, squares = detect_checkboxes(thresh_check,output_image)
-        output_image, circles = detect_radio_buttons(thresh_radio,output_image)
-        
+
         filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
-        filled_radio_buttons,output_image = detect_filled_button(thresh_check,circles,output_image,filled_radio_ratio)
 
-        if filled_radio_buttons or filled_check_buttons:
+        if  filled_check_buttons:
             output_image, roi_check_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
-            output_image, roi_radio_coordinates = extract_text_roi(output_image, filled_radio_buttons,x_radio_ratio,y_radio_ratio)
 
-            print('********************************radio_text*************************************************************')
-            detected_radio_text,detected_radio_yesNo= extract_text_from_roi_radios(image_org, roi_radio_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
             print('********************************check_text*************************************************************')
-            detected_check_text= extract_text_from_roi_checks(image_org, roi_check_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
-            excel_inputs={}
-            # ***************************marital status *************************************************************
-            print('***************************IMMUNIZATIONS*************************************************************')
-            IMMUNIZATIONS_options = ["Influenza","Hepatitis C","Pneumonia","Tetanus","Shingles","initial vaccine series"]
-            validated_IMMUNIZATIONS_options = validate_option(detected_check_text,IMMUNIZATIONS_options,80)
-            booster_options = ["Ist","1st", "2nd", "3rd", "4th", "5th"]
-            validated_booster_options = validate_option(detected_radio_text,booster_options,80)
+            detected_check_text= extract_number_from_roi_checks(image_org, roi_check_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
 
-            if validated_booster_options:
-                booster=validated_booster_options[0]
-                print('booster: ',booster)
-            else:
-                booster=None
-            if validated_IMMUNIZATIONS_options and "initial vaccine series" in validated_IMMUNIZATIONS_options:
-                validated_IMMUNIZATIONS_options = list(reversed(validated_IMMUNIZATIONS_options))
-                if booster:
-                    validated_IMMUNIZATIONS_options[-1]=f"COVID-19 INITIAL VACCINE SERIES WITH {booster.upper()} BOOSTER"
-                else:
-                    validated_IMMUNIZATIONS_options[-1]="COVID-19 INITIAL VACCINE SERIES"
-            else:
-                if booster:
-                    if validated_IMMUNIZATIONS_options:
-                        validated_IMMUNIZATIONS_options.append(f"{booster.upper()} COVID BOOSTER")
-                    else:
-                        validated_IMMUNIZATIONS_options=[]
-                        validated_IMMUNIZATIONS_options.append(f"{booster.upper()} COVID BOOSTER")
 
-            if validated_IMMUNIZATIONS_options:
-                IMMUNIZATIONS_status = join_strings(validated_IMMUNIZATIONS_options)
-                print(f"IMMUNIZATIONS_status: {IMMUNIZATIONS_status}")
-                excel_inputs['E8']=IMMUNIZATIONS_status
-            else :
-                print('nothing selected for IMMUNIZATIONS status')
+            filtered_numbers = filter_numbers(detected_check_text)
+            print(filtered_numbers)
+            excel_inputs = map_numbers_to_cells(filtered_numbers)
+            print(excel_inputs)
 
         else:
             print("No filled button detected.")
-
-
-
-        #guid2
-        #Cancer:
-        Cancer_ROI=detect_word_location(image_org,'Cancer',300)
-        if Cancer_ROI:
-            x1,y1,x2,y2=Cancer_ROI[0]
-            roi=x1,y1,x2,y2
-            # print(y2-y1)
-            Cancer_text=extract_text_from_roi(image_org,roi)
-            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
-            print('Cancer:',Cancer_text)
-            excel_inputs['B23']=Cancer_text
-        else:
-            Cancer_text=''
-            print("cannot detect the word Cancer")
-
-
-
-        output_image, boxes = detect_checkboxes2(thresh_check,output_image)
-        if boxes:
-            # Image.fromarray(output_image).show()
-
-            excel_inputs={}
-
-
-            x, y, w, h = boxes[0]
-            x1,y1,x2,y2 =x+5, y+12, x+w-5, y+h-12
-            box=x1,y1,x2,y2
-            Date_text=extract_text_from_roi(image_org,box)
-            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
-            print('Date text:',Date_text)
-            Date=transform_date(Date_text.replace('.',''))
-            print('Date :',Date)
-            excel_inputs["E136"] = Date
-        else:
-            print('cannot detect the date field')
-
-
-
         Image.fromarray(output_image).show()
-            #******************updating the excel file*************************************
-        # update_excel_sheet(excel_path, excel_inputs)
+        #******************updating the excel file*************************************
+        update_excel_sheet(excel_path, excel_inputs)
     end_time = time.time()
     execution_time = end_time - start_time
     print(f"Time of execution: {execution_time:.2f} seconds")

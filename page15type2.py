@@ -115,7 +115,8 @@ def detect_checkboxes(thresh,img):
             x, y, w, h = cv2.boundingRect(cnt)
             ratio = float(w)/h
             #********************************************************************************************
-            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and (y>950 and y<1100 or y>750 and y<820) and x<1000:  # Check if side length is at least 18 pixels
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1130 and (y>1130 and y<1220 or y>900 and y<950) and x<1000:  # Check if side length is at least 18 pixels
+                print('---',x,y)
                 bounding_boxes.append((x, y, w, h))
 
     # Filter boxes based on distance
@@ -145,7 +146,28 @@ def detect_checkboxes(thresh,img):
         squares.append((center_x, center_y, diameter))
     
     return output, squares
-#page24
+#page15type2
+def detect_radio_buttons(thresh, image_org):
+    circles = cv2.HoughCircles(
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
+        #**********************************************************************************************
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
+        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=20, minRadius=9, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
+    )
+    output = image_org.copy()
+    valid_circles=[]
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        
+        for i in range(circles.shape[0]):
+            #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
+            x, y, r = circles[i]
+            if (y>1130 and y<1220 or y>900 and y<950) and x<1000:
+                valid_circles.append((x, y, 10))
+                cv2.circle(output, (x, y), r, (0, 255, 0), 2)
+    return output, valid_circles
+#page15type2
 def detect_checkboxes2(thresh,img):
     output = img.copy()
     contours, hierarchy = cv2.findContours(thresh, 1, 2)
@@ -157,7 +179,7 @@ def detect_checkboxes2(thresh,img):
             x, y, w, h = cv2.boundingRect(cnt)
             ratio = float(w)/h
             #********************************************************************************************
-            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1200 and y<1390 and x<800:  # Check if side length is at least 18 pixels
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1300 and y<1540 and x<800:  # Check if side length is at least 18 pixels
                 print(x,y)
                 bounding_boxes.append((x, y, w, h))
 
@@ -188,34 +210,14 @@ def detect_checkboxes2(thresh,img):
         squares.append((center_x, center_y, diameter))
     
     return output, squares
-#page24
-def detect_radio_buttons(thresh, image_org):
-    circles = cv2.HoughCircles(
-        # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
-        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
-        #**********************************************************************************************
-        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
-        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=9, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
-    )
-    output = image_org.copy()
-    if circles is not None:
-        circles = np.round(circles[0, :]).astype("int")
-        valid_circles=[]
-        for i in range(circles.shape[0]):
-            #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
-            x, y, r = circles[i]
-            if (y>950 and y<1100 or y>750 and y<820) and x<1000:
-                valid_circles.append((x, y, 10))
-                cv2.circle(output, (x, y), r, (0, 255, 0), 2)
-    return output, valid_circles
-#page24
+#page15type2
 def detect_radio_buttons2(thresh, image_org):
     circles = cv2.HoughCircles(
         # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
         # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
         #**********************************************************************************************
         # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
-        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=6, maxRadius=13# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
+        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=20, minRadius=6, maxRadius=18# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
     )
     output = image_org.copy()
     if circles is not None:
@@ -224,7 +226,8 @@ def detect_radio_buttons2(thresh, image_org):
         for i in range(circles.shape[0]):
             #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
             x, y, r = circles[i]
-            if y>1200 and y<1600:
+            if y>1300 and y<1590:
+                print(x,y,r)
                 valid_circles.append((x, y, 9))
                 cv2.circle(output, (x, y), 9, (0, 255, 0), 2)
     return output, valid_circles
@@ -258,7 +261,7 @@ def detect_word_location(img, word, length, threshold=80):
             bounding_boxes.append((x2, y1-10, x1+length, y2+5))
 
     return bounding_boxes
-#page24
+#page15type2
 def detect_word_location2(img, word, length, threshold=60):
     # Crop the image based on the specified y-axis values
     hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
@@ -269,7 +272,7 @@ def detect_word_location2(img, word, length, threshold=60):
         if fuzz.partial_ratio(line, word) >= threshold:
             x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
             x1, y1, x2, y2 = int(x1)-r, int(y1)-r, int(x2)+r, int(y2)+r#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
-            if x1>600 and x1<900 and y1>700 and y1<900:
+            if x1>700 and x1<1000 and y1>940 and y1<1000:
                 bounding_boxes.append((x1, y1, x2, y2))
     return bounding_boxes
 
@@ -545,13 +548,13 @@ def join_strings(string_list):
 
 if __name__ == "__main__":
     start_time = time.time()
+    excel_inputs={}
     # pdf_path = ('BAD_QUALITY_2.pdf')
     # for pdf_path in ['BAD_QUALITY_2.pdf','BAD_QUALITY_3.pdf','BAD_QUALITY.pdf','FILLABLES_2.pdf','FILLABLES_3.pdf','FILLABLES_4.pdf','FILLABLES_5.pdf','FILLABLES_6.pdf','FOR_UPWORK_#1.pdf','FOR_UPWORK_#2.pdf','FOR_UPWORK_#3.pdf','FOR_UPWORK_#4.pdf','HIGH_QUALITY_2.pdf','HIGH_QUALITY_3.pdf','HIGH_QUALITY.pdf','MEDIUM_QUALITY.pdf']:
-    for pdf_path in ['DOES NOT SCANE 1.pdf']:
-        excel_inputs={}
+    for pdf_path in ['DOES NOT SCAN 2.pdf']:
         print(pdf_path)
         excel_path = ('WORKING.xlsm')
-        page=24
+        page=15
         noise=False# khalih daymen cha3el ynahi hadouk l ahrof random li yekhorjou ki detcti text fi blasa vide (bayda)
         plure=False
         skewed=True
@@ -564,7 +567,7 @@ if __name__ == "__main__":
         #***********************************valus that can be tweaked************************************************
         #ratio ta3 dettection ta3 les radio buttons w check boxes modifier 3liha
         thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
-        thresh_radio_ratio=110#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
+        thresh_radio_ratio=140#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
         #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
         filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
         filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
@@ -619,6 +622,8 @@ if __name__ == "__main__":
         thresh_radio = preprocess_image(output_image,thresh_radio_ratio)
         thresh_check = preprocess_image(output_image,thresh_check_ratio)
 
+        Image.fromarray(thresh_radio).show()
+
         output_image, squares = detect_checkboxes(thresh_check,output_image)
         output_image, circles = detect_radio_buttons(thresh_radio,output_image)
 
@@ -634,7 +639,7 @@ if __name__ == "__main__":
 
             detected_radio_text,detected_radio_yesNo= extract_text_from_roi_radios(image_org, roi_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
             print('********************************Cough *************************************************************')
-            
+
             options=['Productive','Non-productive']
             validated_radio_text=validate_option(detected_radio_text,options)
             # Check the conditions and update excel_inputs['B56'] accordingly
@@ -651,16 +656,16 @@ if __name__ == "__main__":
 
 
             print('********************************intermittent/continuous*************************************************************')
-            
+
             options2=['intermittent','continuous']
             validated_radio_text2=validate_option(detected_radio_text,options2)
             if validated_radio_text2 and 'intermittent' in validated_radio_text2:
                 excel_inputs['B59'] = 'intermittent'
             elif validated_radio_text2 and 'continuous' in validated_radio_text2:
                 excel_inputs['B59'] = 'continuous'
+
         else:
             print("No filled button detected.")
-
         O2_ROI=detect_word_location2(image_org,'LPM',40)
         if O2_ROI:
             x1,y1,x2,y2=O2_ROI[0]
@@ -731,7 +736,6 @@ if __name__ == "__main__":
                     final_sorted_squars.extend(group)
 
                 # Step 3: Extracting the position (row, column) of each squars in the given list
-                
                 for squars in table_filled_buttons:
                     index = final_sorted_squars.index(squars)
                     row = (index % 5) + 1
@@ -774,11 +778,10 @@ if __name__ == "__main__":
             print(excel_inputs)
 
 
-
         print('********************************breath sounds*************************************************************')
 
-        line1_ROI=detect_word_location(image_org,'Anterior:',800)
-        line2_ROI=detect_word_location(image_org,'Posterior:',800)
+        line1_ROI=detect_word_location(image_org,'Anterior:',600)
+        line2_ROI=detect_word_location(image_org,'Posterior:',700)
         if line1_ROI:
             x1,y1,x2,y2=line1_ROI[0]
             if y2-y1 >40:
@@ -786,11 +789,11 @@ if __name__ == "__main__":
                 y2=y2-10
             roi=x1+10,y1,x1+150,y2
             # x11,y11,x22,y22=roi
-            # cv2.rectangle(output_image, (x11, y11), (x22, y22), (255, 0, 255), 2)
+            # cv2.rectangle(output_image, (x11, y11), (x22, y22), (100, 0, 255), 2)
             line1=extract_text_from_roi(image_org,roi)
-            roi=x1+10+300,y1,x2,y2
+            roi=x1+10+250,y1,x2,y2
             # x11,y11,x22,y22=roi
-            # cv2.rectangle(output_image, (x11, y11), (x22, y22), (255, 0, 255), 2)
+            # cv2.rectangle(output_image, (x11, y11), (x22, y22), (100, 0, 255), 2)
             line1=line1+' '+extract_text_from_roi(image_org,roi)
             cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
             print('line1 text:',line1.replace('\n',' ').replace('.',' ').replace('_',''))

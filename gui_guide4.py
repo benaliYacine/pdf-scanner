@@ -10,12 +10,33 @@ from fuzzywuzzy import fuzz #You're trying to find the location of a phrase in a
 import fitz
 import os
 import re
-import resources_rc
 
 # default fcts nafshom ta3 l page 10
-def pdf_to_image(pdf_path,page):
+def pdf_to_image_old(pdf_path,page):
     images = convert_from_path(pdf_path)
     return np.array(images[page-1])
+
+def pdf_to_image(pdf_path,page_num, zoom=200/72):
+    # Load the PDF
+    doc = fitz.open(pdf_path)
+
+    # Get the current page
+    page = doc.load_page(page_num)
+    
+    # Create a matrix for zooming
+    mat = fitz.Matrix(zoom, zoom)
+    
+    # Get the pixmap using the matrix for higher resolution
+    pix = page.get_pixmap(matrix=mat)
+
+    # Convert pixmap to numpy array
+    if pix.alpha:
+        image_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, 4)  # RGBA
+    else:
+        image_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, 3)  # RGB
+    
+    
+    return image_np
 
 def pdf_to_images(pdf_path, zoom=200/72):
     # Load the PDF
@@ -232,6 +253,7 @@ def detect_filled_button(thresh, circles,image_org, filled_threshold_ratio):
             filled_buttons.append((x, y, r))
 
     return filled_buttons,output
+
 
 def detect_word_location(img, word, length, threshold=80):
     # Crop the image based on the specified y-axis values
@@ -468,7 +490,8 @@ def extract_number_from_roi_checks(image_org, roi_coordinates):
 
 def validate_option(detected_text, options, threshold=80):
     validated_options = []
-
+    if not detected_text:
+        return None
     for text in detected_text:
         for option in options:
             # Using token sort ratio to handle out of order issues and partial matches
@@ -673,6 +696,48 @@ def detect_checkboxes_p9(thresh,img):
             #********************************************************************************************
             if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y >1500 and y<2030:  # Check if side length is at least 18 pixels
                 # print(y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes_p18(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>328 and y<1314:  # Check if side length is at least 18 pixels
                 bounding_boxes.append((x, y, w, h))
 
     # Filter boxes based on distance
@@ -1095,14 +1160,6 @@ def detect_needed_area(thresh,img):
         cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
     return output, bounding_boxes
 
-#page 18 methods
-def extract_needed_section(img_np):
-    # Step 2: Crop the image to the detected section.
-    y1, y2 = ( 328, 1314)
-    cropped_image = img_np[y1:y2,:]
-    # Image.fromarray(cropped_image).show()
-    return cropped_image
-
 def detect_Total_aria(thresh,img):
     output = img.copy()
     contours, hierarchy = cv2.findContours(thresh, 1, 2)
@@ -1114,7 +1171,7 @@ def detect_Total_aria(thresh,img):
             x, y, w, h = cv2.boundingRect(cnt)
             ratio = float(w)/h
             #********************************************************************************************
-            if  w >= 85 and w <= 106 and h >= 40 and h <= 48:  # Check if side length is at least 18 pixels
+            if  w >= 85 and w <= 106 and h >= 40 and h <= 48 and y>328 and y<1314:  # Check if side length is at least 18 pixels
                 # print(w,h)
                 bounding_boxes.append((x, y, w, h))
 
@@ -1235,6 +1292,42 @@ def format_site_texts(site1_text, site2_text, site3_text):
     formatted_text = join_strings(sites)
 
     return formatted_text.upper()
+
+def template_match(scanned_image, template_image):
+    # Apply template matching
+    res = cv2.matchTemplate(scanned_image, template_image, cv2.TM_CCOEFF_NORMED)
+    # Get the maximum match value
+    _, max_val, _, _ = cv2.minMaxLoc(res)
+    return max_val
+
+def compare_with_references(scanned_roi, ref_2,ref_0):
+    if len(scanned_roi.shape) > 2:
+        scanned_roi = preprocess_image(scanned_roi,200)
+    # mask = cv2.bitwise_not(scanned_roi)
+    # scanned_roi = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGRA)
+    # scanned_roi[:, :, 3] = mask
+    # Image.fromarray(scanned_roi).show()
+    if len(ref_2.shape) > 2:
+        ref_2 = preprocess_image(ref_2,200)
+    # mask = cv2.bitwise_not(ref_2)
+    # ref_2 = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGRA)
+    # ref_2[:, :, 3] = mask
+    # Image.fromarray(ref_2).show()
+    if len(ref_0.shape) > 2:
+        ref_0 = preprocess_image(ref_0,200)
+    # mask = cv2.bitwise_not(ref_2)
+    # ref_2 = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGRA)
+    # ref_2[:, :, 3] = mask
+    # Image.fromarray(ref_0).show()
+
+
+    score_2 = template_match(scanned_roi, ref_2)
+    score_0 = template_match(scanned_roi, ref_0)
+
+    if score_2 > score_0:
+        return "2", score_2
+    else:
+        return "0", score_0
 
 # full pdf method:
 def image_preparation(image_org,noise, plure, skewed):
@@ -1512,8 +1605,7 @@ def page18(image_org,noise, plure, skewed ,show_imgs):
         filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
 
 
-        needed_section_image=extract_needed_section(image_org)
-        image_org=needed_section_image
+
         output_image= image_org.copy()
 
         #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1531,7 +1623,7 @@ def page18(image_org,noise, plure, skewed ,show_imgs):
         print('Total_text:',Total_text)
         # Image.fromarray(output_image).show()
         if Total_text not in ['0','1','2','3','4','5','6','7','8','9','10']:
-            output_image, squares = detect_checkboxes(thresh_check,output_image)
+            output_image, squares = detect_checkboxes_p18(thresh_check,output_image)
             filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
             if filled_check_buttons:
                 filled_count = len(filled_check_buttons)
@@ -1896,7 +1988,6 @@ def page25(image_org,noise, plure, skewed ,show_imgs):
         if not final_diet_text:
             final_diet_text='regular'
 
-
         if not final_diet_text.endswith(" diet") and final_diet_text!='':
             final_diet_text += " diet"
 
@@ -1965,7 +2056,7 @@ def page35(image_org,noise, plure, skewed ,show_imgs):
                 print(excel_inputs)
 
             else :
-                print('nothing selected for marital status')
+                print('nothing selected')
 
         if show_imgs:
             Image.fromarray(output_image).show()
@@ -2538,9 +2629,10 @@ def detect_radio_buttons_p24(thresh, image_org):
         thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=9, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
     )
     output = image_org.copy()
+    valid_circles=[]
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
-        valid_circles=[]
+        
         for i in range(circles.shape[0]):
             #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
             x, y, r = circles[i]
@@ -2637,10 +2729,11 @@ def detect_radio_buttons2_p24(thresh, image_org):
         # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
         thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=6, maxRadius=13# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
     )
+    valid_circles=[]
     output = image_org.copy()
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
-        valid_circles=[]
+        
         for i in range(circles.shape[0]):
             #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
             x, y, r = circles[i]
@@ -2662,6 +2755,91 @@ def detect_word_location2_p24(img, word, length, threshold=60):
             if x1>600 and x1<900 and y1>700 and y1<900:
                 bounding_boxes.append((x1, y1, x2, y2))
     return bounding_boxes
+
+def detect_checkboxes0_p24(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and (y>950 and y<1100 or y>750 and y<820) and x<1000:  # Check if side length is at least 18 pixels
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes2_24(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1200 and y<1390 and x<800:  # Check if side length is at least 18 pixels
+                # print(x,y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
 
 #fct special b quelque page
 #page1
@@ -2743,6 +2921,8 @@ def update_language_information(language_text, excel_inputs):
         excel_inputs['I29'] = f"PCG speaks {formatted_language_text}"
 
     return excel_inputs
+
+
 
 #page6
 def update_dentures_cell(validated_DENTURES_options):
@@ -2922,6 +3102,12 @@ def page6p2(image_org,noise, plure, skewed,show_imgs):
             y2=y2-10
         cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
         box=x1,y1,x2,y2
+
+        reference_image_2 = cv2.imread('path_to_ref_image_2.jpg')
+        reference_image_0 = cv2.imread('path_to_ref_image_0.jpg')
+        roi_x_start, roi_y_start, roi_x_end, roi_y_end = box 
+        roi_image = thresh_code[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+
         hearing_text=extract_numbers_from_roi_p6(thresh_code,box)
         # if hearing_text not in ['0','1','2','3','4']:
         #     x1=x1+1
@@ -2935,6 +3121,8 @@ def page6p2(image_org,noise, plure, skewed,show_imgs):
             hearing_text='2'
         if '3' in hearing_text:
             hearing_text='3'
+        if 'q' in hearing_text:
+            hearing_text='2'
         if 'z' in hearing_text:
             hearing_text='2'
         if '4' in hearing_text:
@@ -2948,6 +3136,9 @@ def page6p2(image_org,noise, plure, skewed,show_imgs):
         if hearing_text not in ['0','1','2','3']:
             hearing_text='0'
 
+        if '2' in hearing_text:
+            number, score = compare_with_references(roi_image, reference_image_2,reference_image_0)
+            print(f"Detected Number: {number} with a score of {score}")
 
         print('hearing_text:',hearing_text)
 
@@ -2969,7 +3160,7 @@ def page6p2(image_org,noise, plure, skewed,show_imgs):
         print(f"hearing: {hearing}")
 
         if hearing != "Invalid hearing_number":
-            excel_inputs['B65']=hearing
+            excel_inputs['J14']=hearing
 
         # second part------------------------------------------------------------------------
 
@@ -3030,6 +3221,9 @@ def page6p2(image_org,noise, plure, skewed,show_imgs):
             y1=y1+3
         cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
         box=x1,y1,x2,y2
+        roi_x_start, roi_y_start, roi_x_end, roi_y_end = box 
+        roi_image = thresh_code[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+
 
         vision_text=extract_numbers_from_roi_p6(thresh_code,box)
 
@@ -3040,6 +3234,8 @@ def page6p2(image_org,noise, plure, skewed,show_imgs):
             vision_text='2'
         if '3' in vision_text:
             vision_text='3'
+        if 'q' in vision_text:
+            vision_text='2'
 
         if 'c' in vision_text:
             vision_text='0'
@@ -3054,6 +3250,9 @@ def page6p2(image_org,noise, plure, skewed,show_imgs):
         if vision_text not in ['0','1','2','3','4']:
             vision_text='0'
 
+        if '2' in vision_text:
+            number, score = compare_with_references(roi_image, reference_image_2,reference_image_0)
+            print(f"Detected Number: {number} with a score of {score}")
 
 
 
@@ -3226,16 +3425,16 @@ def page5(image_org,noise, plure, skewed ,show_imgs):
             detected_check_text= extract_text_from_roi_checks(image_org, roi_check_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
             # ***************************marital status *************************************************************
             print('***************************IMMUNIZATIONS*************************************************************')
-            IMMUNIZATIONS_options = ["initial vaccine series","Shingles","Tetanus","Pneumonia","Hepatitis C","Influenza"]
+            IMMUNIZATIONS_options = ["Influenza","Hepatitis C","Pneumonia","Tetanus","Shingles","initial vaccine series"]
             validated_IMMUNIZATIONS_options = validate_option(detected_check_text,IMMUNIZATIONS_options,80)
-            booster_options = ["Ist","1st", "2nd", "3rd", "4th", "5th"]
+            booster_options = ["Ist","1st", "2nd", "3rd", "4th", "5th", "Yes", "No"]
             validated_booster_options = validate_option(detected_radio_text,booster_options,80)
+
             if validated_booster_options:
                 booster=validated_booster_options[0]
                 print('booster: ',booster)
             else:
                 booster=None
-            
             if validated_IMMUNIZATIONS_options and "initial vaccine series" in validated_IMMUNIZATIONS_options:
                 validated_IMMUNIZATIONS_options = list(reversed(validated_IMMUNIZATIONS_options))
                 if booster:
@@ -3251,15 +3450,14 @@ def page5(image_org,noise, plure, skewed ,show_imgs):
                         validated_IMMUNIZATIONS_options.append(f"{booster.upper()} COVID BOOSTER")
 
             if validated_IMMUNIZATIONS_options:
-                IMMUNIZATIONS_status = join_strings(validated_IMMUNIZATIONS_options)
-                print(f"IMMUNIZATIONS_status: {IMMUNIZATIONS_status}")
-                excel_inputs['E8']=IMMUNIZATIONS_status
+                IMMUNIZATIONS_status = join_strings(validated_IMMUNIZATIONS_options).upper()
+                print(f"IMMUNIZATIONS_status: {IMMUNIZATIONS_status.upper()}")
+                excel_inputs['E8']=IMMUNIZATIONS_status.upper()
             else :
                 print('nothing selected for IMMUNIZATIONS status')
 
         else:
             print("No filled button detected.")
-
 
         #guid2
         #Cancer:
@@ -3319,8 +3517,13 @@ def page24p2(image_org,noise, plure, skewed ,show_imgs):
         filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
         filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
         #ratio ta3 tol w 3ard el ROIs ta3 koul button
+        x_check_ratio=30
+        y_check_ratio=5#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
         x_radio_ratio=30
         y_radio_ratio=6
+
+
 
         output_image=image_org.copy()
 
@@ -3328,16 +3531,88 @@ def page24p2(image_org,noise, plure, skewed ,show_imgs):
         thresh_radio = preprocess_image(output_image,thresh_radio_ratio)
         thresh_check = preprocess_image(output_image,thresh_check_ratio)
 
+        
+        output_image, squares = detect_checkboxes0_p24(thresh_check,output_image)
         output_image, circles = detect_radio_buttons_p24(thresh_radio,output_image)
 
+        filled_check_buttons,output_image = detect_filled_button_p24(thresh_check,squares,output_image,filled_check_ratio)
         filled_radio_buttons,output_image = detect_filled_button_p24(thresh_check,circles,output_image,filled_radio_ratio)
-
+        
         if filled_radio_buttons :
-            output_image, roi_radio_coordinates = extract_text_roi_p24(output_image, filled_radio_buttons,x_radio_ratio,y_radio_ratio)
+            output_image, roi_coordinates = extract_text_roi_p24(output_image, filled_radio_buttons,x_radio_ratio,y_radio_ratio)
 
-            print('********************************radio_text*************************************************************')
+
+
+            detected_radio_text,detected_radio_yesNo= extract_text_from_roi_radios_p24(image_org, roi_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+
+
+
+            print('********************************Cough *************************************************************')
             
-            detected_radio_text,detected_radio_yesNo= extract_text_from_roi_radios_p24(image_org, roi_radio_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+            options=['Productive','Non-productive']
+            validated_radio_text=validate_option(detected_radio_text,options)
+            # Check the conditions and update excel_inputs['B56'] accordingly
+            cough_status = detected_radio_yesNo.get('Cough', '')  # Default to empty string if 'Cough' is not in the dict
+            if cough_status == 'No':
+                excel_inputs['B56'] = ''
+            elif cough_status == 'Yes' or (validated_radio_text and 'Productive' in validated_radio_text) or (validated_radio_text and 'Non-productive' in validated_radio_text):
+                if validated_radio_text and 'Productive' in validated_radio_text:
+                    excel_inputs['B56'] = 'PRODUCTIVE COUGH'
+                elif validated_radio_text and 'Non-productive' in validated_radio_text:
+                    excel_inputs['B56'] = 'NON-PRODUCTIVE COUGH'
+                else:
+                    excel_inputs['B56'] = 'COUGH'
+                print(excel_inputs['B56'])
+
+
+            print('********************************intermittent/continuous*************************************************************')
+            
+            options2=['intermittent','continuous']
+            validated_radio_text2=validate_option(detected_radio_text,options2)
+            if validated_radio_text2 and 'intermittent' in validated_radio_text2:
+                excel_inputs['B59'] = 'intermittent'
+            elif validated_radio_text2 and 'continuous' in validated_radio_text2:
+                excel_inputs['B59'] = 'continuous'
+        else:
+            print("No filled button detected.")
+
+        O2_ROI=detect_word_location2_p24(image_org,'LPM',40)
+        if O2_ROI:
+            x1,y1,x2,y2=O2_ROI[0]
+            # print(x2-x1)
+            if x2-x1<60:
+                x1=x1-130
+            elif x2-x1<155:
+                x1=x1-60
+            roi=x1,y1,x2,y2-4
+            O2_text=extract_text_from_roi(image_org,roi)
+            if '@' not in O2_text:
+                x1=x1-60
+                roi=x1,y1,x2,y2
+                O2_text=extract_text_from_roi(image_org,roi)
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            # print('O2 text:',O2_text)
+            # regular expression pattern to match text between "O2@" and "LPM"
+            pattern = r'@\s*(.*?)\s*LPM'
+
+            # find matches in the string
+            match = re.search(pattern, O2_text)
+
+            # if a match is found, extract the text
+            if match:
+                extracted_O2_text = match.group(1).replace('_','')
+                print('O2 text:',extracted_O2_text)
+                excel_inputs['C59']=extracted_O2_text
+            else:
+                print('there is nothing in o2@')
+
+
+
+        elif filled_check_buttons:
+            output_image, roi_coordinates = extract_text_roi_p24(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+
+
+            detected_radio_text,detected_radio_yesNo= extract_text_from_roi_radios_p24(image_org, roi_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
 
 
 
@@ -3406,25 +3681,49 @@ def page24p2(image_org,noise, plure, skewed ,show_imgs):
 
         output_image, table_circles = detect_radio_buttons2_p24(thresh_radio,output_image)
 
-        table_filled_buttons,output_image = detect_filled_button_p24(thresh_check,table_circles,output_image,filled_radio_ratio)
+        positions = []
+        if len(table_circles)>25:
+            table_filled_buttons,output_image = detect_filled_button_p24(thresh_check,table_circles,output_image,filled_radio_ratio)
+            if table_filled_buttons:
+                # Step 1: Sort the circles based on the x position
+                sorted_circles = sorted(table_circles, key=lambda circle: circle[0])
 
-        if table_filled_buttons:
-            # Step 1: Sort the circles based on the x position
-            sorted_circles = sorted(table_circles, key=lambda circle: circle[0])
+                # Step 2 and 3: Divide the list into groups of 5 and sort each group based on y position
+                final_sorted_circles = []
+                for i in range(0, len(sorted_circles), 5):
+                    group = sorted(sorted_circles[i:i+5], key=lambda circle: circle[1])
+                    final_sorted_circles.extend(group)
 
-            # Step 2 and 3: Divide the list into groups of 5 and sort each group based on y position
-            final_sorted_circles = []
-            for i in range(0, len(sorted_circles), 5):
-                group = sorted(sorted_circles[i:i+5], key=lambda circle: circle[1])
-                final_sorted_circles.extend(group)
+                # Step 3: Extracting the position (row, column) of each circle in the given list
+                
+                for circle in table_filled_buttons:
+                    index = final_sorted_circles.index(circle)
+                    row = (index % 5) + 1
+                    column = (index // 5) + 1
+                    positions.append((row, column))
+            else:
+                print("No filled button detected.")
+        else:
+            output_image, table_squars = detect_checkboxes2_24(thresh_radio,output_image)
+            table_filled_buttons,output_image = detect_filled_button_p24(thresh_check,table_squars,output_image,filled_radio_ratio)
+            if table_filled_buttons:
+                # Step 1: Sort the squarss based on the x position
+                sorted_squars = sorted(table_squars, key=lambda squars: squars[0])
 
-            # Step 3: Extracting the position (row, column) of each circle in the given list
-            positions = []
-            for circle in table_filled_buttons:
-                index = final_sorted_circles.index(circle)
-                row = (index % 5) + 1
-                column = (index // 5) + 1
-                positions.append((row, column))
+                # Step 2 and 3: Divide the list into groups of 5 and sort each group based on y position
+                final_sorted_squars = []
+                for i in range(0, len(sorted_squars), 5):
+                    group = sorted(sorted_squars[i:i+5], key=lambda squars: squars[1])
+                    final_sorted_squars.extend(group)
+
+                # Step 3: Extracting the position (row, column) of each squars in the given list
+                for squars in table_filled_buttons:
+                    index = final_sorted_squars.index(squars)
+                    row = (index % 5) + 1
+                    column = (index // 5) + 1
+                    positions.append((row, column))
+            else:
+                print("No filled button detected.")
 
             print('marked positions in the table (row, column):',positions)
 
@@ -3458,8 +3757,6 @@ def page24p2(image_org,noise, plure, skewed ,show_imgs):
                         excel_inputs[cell] = ''
 
             print(excel_inputs)
-        else:
-            print("No filled button detected.")
 
 
         print('********************************breath sounds*************************************************************')
@@ -3532,6 +3829,1908 @@ def page24p2(image_org,noise, plure, skewed ,show_imgs):
     else:
         return excel_inputs
 
+#page1 type2
+def detect_checkboxes_p1_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            # w >= 20 and w <= 200 and h >= 43 and h <= 48
+            # w >= 68 and w <= 74 and h >= 44 and h <= 50
+            #********************************************************************************************
+            if  w >= 450 and w <= 550 and h >= 50 and h <= 150 and y>1000 and y<1400:  # Check if side length is at least 18 pixels
+                print(w,h,y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+
+    return output, filtered_boxes
+
+def detect_Total_aria_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if  w >= 85 and w <= 106 and h >= 40 and h <= 48 and y>1000:  # Check if side length is at least 18 pixels
+                # print(w,h)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+
+    return output, filtered_boxes
+
+def detect_checkboxes_p11_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1000:  # Check if side length is at least 18 pixels
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes_p13_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>950 and y<1400:  # Check if side length is at least 18 pixels
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes_p23_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 12 and w <= 30 and y<1470 and y>500:  # Check if side length is at least 18 pixels
+                # print(y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+
+        diameter =10
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes_p16_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>600 and y<750:  # Check if side length is at least 18 pixels
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_word_location0_p16_t2(img, word, length, threshold=95):
+    # Crop the image based on the specified y-axis values
+    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    bounding_boxes = []
+
+    for line in hocr_data.splitlines():
+        r = 4
+        if fuzz.partial_ratio(line, word) >= threshold:
+            # print(line)
+            x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
+            x1, y1, x2, y2 = int(x1)-r, int(y1), int(x2)+r, int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            # print(y1)
+            bounding_boxes.append((x2, y1-5, x2+length, y2))
+
+    return bounding_boxes
+
+def detect_word_location_p16_t2(img, word, length, threshold=80):
+    # Crop the image based on the specified y-axis values
+    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    bounding_boxes = []
+
+    for line in hocr_data.splitlines():
+        r = 4
+        if fuzz.partial_ratio(line, word) >= threshold:
+            # print(line)
+            x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
+            x1, y1, x2, y2 = int(x1)-r, int(y1), int(x2)+r, int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            if y1>600 and y1<780:
+                # print(y1)
+                bounding_boxes.append((x1+92, y1-5, x1+92+length, y2))
+
+    return bounding_boxes
+
+def detect_radio_buttons_p15_t2(thresh, image_org):
+    circles = cv2.HoughCircles(
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
+        #**********************************************************************************************
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
+        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=9, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
+    )
+    valid_circles=[]
+    output = image_org.copy()
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        
+        for i in range(circles.shape[0]):
+            #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
+            x, y, r = circles[i]
+            if (y>1130 and y<1220 or y>900 and y<950) and x<1000:
+                valid_circles.append((x, y, 10))
+                cv2.circle(output, (x, y), r, (0, 255, 0), 2)
+    return output, valid_circles
+
+def detect_radio_buttons2_p15_t2(thresh, image_org):
+    circles = cv2.HoughCircles(
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
+        #**********************************************************************************************
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
+        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=22, minRadius=6, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
+    )
+    valid_circles=[]
+    output = image_org.copy()
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        
+        for i in range(circles.shape[0]):
+            #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
+            x, y, r = circles[i]
+            if y>1300 and y<1590:
+                # print(r)
+                valid_circles.append((x, y, 9))
+                cv2.circle(output, (x, y), 9, (0, 255, 0), 2)
+    return output, valid_circles
+
+def detect_word_location2_p15_t2(img, word, length, threshold=60):
+    # Crop the image based on the specified y-axis values
+    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    bounding_boxes = []
+
+    for line in hocr_data.splitlines():
+        r = 4
+        if fuzz.partial_ratio(line, word) >= threshold:
+            x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
+            x1, y1, x2, y2 = int(x1)-r, int(y1)-r, int(x2)+r, int(y2)+r#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            if x1>700 and x1<1000 and y1>940 and y1<1000:
+                bounding_boxes.append((x1, y1, x2, y2))
+    return bounding_boxes
+
+def detect_word_location_p4_t2(img, word, length, threshold=80):
+    # Crop the image based on the specified y-axis values
+    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    bounding_boxes = []
+
+    for line in hocr_data.splitlines():
+        r = 4
+        if fuzz.partial_ratio(line, word) >= threshold:
+            # print(line)
+            x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
+            x1, y1, x2, y2 = int(x1)-r, int(y1), int(x2)+r, int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            if y1>300 and y1<500:
+                bounding_boxes.append((x1+93, y1-3, x1+97+length, y2))
+
+    return bounding_boxes
+
+def detect_checkboxes_p4_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y<1100:  # Check if side length is at least 18 pixels
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_radio_buttons_p4_t2(thresh, image_org):
+    circles = cv2.HoughCircles(
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
+        #**********************************************************************************************
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
+        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=9, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
+    )
+    output = image_org.copy()
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        filtered_circles=[]
+        for i in range(circles.shape[0]):
+            #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
+            x, y, r = circles[i]
+            if y<1100:
+                filtered_circles.append((x, y, 10))
+                cv2.circle(output, (x, y), r, (0, 255, 0), 2)
+    return output, filtered_circles
+
+def detect_word_location2_p4_t2(img, word, length, threshold=75):
+    # Crop the image based on the specified y-axis values
+    # cropped_img = img[850:, :]
+    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    bounding_boxes = []
+    
+    for line in hocr_data.splitlines():
+        r = 4
+        if fuzz.partial_ratio(line, word) >= threshold :
+            # print(line)
+            x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            bounding_boxes.append((x2+95, y1-7, x2+length, y2))
+
+    return bounding_boxes
+
+def extract_text_from_roi_radios_p4_t2(image_org, roi_coordinates):
+    detected_options1=[]
+    detected_options2=[]
+    for roi_x_start, roi_y_start, roi_x_end, roi_y_end in roi_coordinates :
+        roi_image = image_org[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+        text = pytesseract.image_to_string(roi_image, config='--psm 6').strip()  
+        first_word=text.split(' ')[0]# Extracting the first word
+        if roi_x_start<600:
+            detected_options1.append(first_word)
+        else:
+            detected_options2.append(first_word)
+
+    print('sleep detected_options: ',detected_options1)
+    print('rest detected_options: ',detected_options2)
+    return detected_options1,detected_options2
+
+def detect_word_location0_p4_t2(img, word, length, threshold=80):
+    # Crop the image based on the specified y-axis values
+    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    bounding_boxes = []
+
+    for line in hocr_data.splitlines():
+        r = 4
+        if fuzz.partial_ratio(line, word) >= threshold:
+            # print(line)
+            x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
+            x1, y1, x2, y2 = int(x1)-r, int(y1), int(x2)+r, int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            if y1>500 and y1<800:
+                bounding_boxes.append((x2+83, y1-10, x2+80+length, y2))
+
+    return bounding_boxes
+
+def detect_word_location1_p4_t2(img, word, length, threshold=80):
+    # Crop the image based on the specified y-axis values
+    hocr_data = pytesseract.image_to_pdf_or_hocr(img, extension='hocr').decode('utf-8')
+    bounding_boxes = []
+
+    for line in hocr_data.splitlines():
+        r = 4
+        if fuzz.partial_ratio(line, word) >= threshold:
+            # print(line)
+            x1, y1, x2, y2 = line.split('bbox ')[1].split(';')[0].split()
+            x1, y1, x2, y2 = int(x1)-r, int(y1), int(x2)+r, int(y2)#edt 750 lakhaterch rani dayer crop le teswira b 750 fel y axe tema lawem n3awed nzido
+            if y1>500 and y1<800:
+                bounding_boxes.append((x2+103, y1-10, x2+97+length, y2-7))
+
+    return bounding_boxes
+
+def detect_checkboxes_p19_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1600:  # Check if side length is at least 18 pixels
+                # print(y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for Cancer_box in bounding_boxes:
+            if distance(box, Cancer_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_radio_buttons_p19_t2(thresh, image_org):
+    circles = cv2.HoughCircles(
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
+        #**********************************************************************************************
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
+        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=9, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
+    )
+    output = image_org.copy()
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        filtered_circles=[]
+        for i in range(circles.shape[0]):
+            
+            #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
+            x, y, r = circles[i]
+            if y>1600:
+                filtered_circles.append((x, y, 10))
+            # circles[i] = (x, y, 10)
+                cv2.circle(output, (x, y), r, (0, 255, 0), 2)
+    return output, filtered_circles
+
+def detect_checkboxes_p3_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 12 and w <= 30 and y>900 and y <1150:  # Check if side length is at least 18 pixels
+                # print(y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+
+        diameter =10
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes_p2_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 12 and w <= 30 and y>1100 and y <1400:  # Check if side length is at least 18 pixels
+                # print(y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes_p12_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>650 and y<830 and x <600:  # Check if side length is at least 18 pixels
+                # print(y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for Cancer_box in bounding_boxes:
+            if distance(box, Cancer_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_radio_buttons_p12_t2(thresh, image_org):
+    circles = cv2.HoughCircles(
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.35, minDist=30, param1=50, param2=25, minRadius=8, maxRadius=11
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200, param1=50, param2=25, minRadius=20, maxRadius=30
+        #**********************************************************************************************
+        # thresh, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=50, param2=27, minRadius=9, maxRadius=15
+        thresh, cv2.HOUGH_GRADIENT, dp=0.1, minDist=20, param1=50, param2=19, minRadius=9, maxRadius=15# kanet dp=0.1 w kanet temchi m3a kamel les pdf li smouhoum for upwork
+    )
+    output = image_org.copy()
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        filtered_circles=[]
+        for i in range(circles.shape[0]):
+            #radit r=10 daymen mechi 3la hsab cha ydetecti l code kima l checkboxes radithom diameter=11 haka wlat khir fel detection ta3 filled buttons pareceque daymen nafs l size men9bel kan kayen li ydetectihom kbar kayen li sghar tema hadak el ratio s3ib bach nhadedou ida 0.5 wela 0.6 welaa....
+            x, y, r = circles[i]
+            if y>650 and y<800 and x <600:
+                # print(x,y)
+                filtered_circles.append((x, y, 10))
+            # circles[i] = (x, y, 10)
+                cv2.circle(output, (x, y), r, (0, 255, 0), 2)
+    return output, filtered_circles
+#hadi dir extract lel kelma lewla w zawja mechi ghi lexla
+def extract_text_from_roi_checks_p2_t2(image_org, roi_coordinates):
+    detected_options=[]
+    for roi_x_start, roi_y_start, roi_x_end, roi_y_end in roi_coordinates :
+        roi_image = image_org[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+        text = pytesseract.image_to_string(roi_image, config='--psm 6').strip()  
+        #ida kanet l kelma no wela yes n3amro dictionaire detected_yes_no
+        first_word=text.split(' ')[0]# Extracting the first word
+        if not(first_word=='Inability' and 'cope'==text.split(' ')[2]):
+            first_two_words=first_word+' '+text.split(' ')[1]
+            detected_options.append(first_two_words)
+    print('detected_options: ',detected_options)
+    return detected_options
+
+#hadi tvirifi 2 kelmat lwala mechi ghi l kelma lewla
+def validate_option_p2_t2(detected_text, options, threshold=80):
+    validated_options = []
+
+    for text in detected_text:
+        for option in options:
+            # Using token sort ratio to handle out of order issues and partial matches
+            if len(option.split())>1:
+                if fuzz.token_sort_ratio(text, option.split()[0]+' '+option.split()[1]) > threshold:
+                    validated_options.append(option)
+            else:
+                if fuzz.token_sort_ratio(text, option.split()[0]) > threshold:
+                    validated_options.append(option)
+    if len(validated_options) == 0:
+        return None
+    else:
+        print('validated options:', validated_options)
+        return validated_options
+
+def detect_checkboxes_p15_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1130 and (y>1130 and y<1220 or y>900 and y<950) and x<1000:  # Check if side length is at least 18 pixels
+                # print('---',x,y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def detect_checkboxes2_p15_t2(thresh,img):
+    output = img.copy()
+    contours, hierarchy = cv2.findContours(thresh, 1, 2)
+
+    bounding_boxes = []
+    for cnt in contours:
+        approx = cv2.approxPolyDP(cnt, 0.03*cv2.arcLength(cnt, True), True)
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(cnt)
+            ratio = float(w)/h
+            #********************************************************************************************
+            if ratio >= 0.8 and ratio <= 1.2 and w >= 18 and w <= 28 and y>1300 and y<1540 and x<800:  # Check if side length is at least 18 pixels
+                # print(x,y)
+                bounding_boxes.append((x, y, w, h))
+
+    # Filter boxes based on distance
+    filtered_boxes = []
+    while bounding_boxes:
+        box = bounding_boxes.pop(0)
+        keep = True
+        for other_box in bounding_boxes:
+            if distance(box, other_box) < 20:
+                keep = False
+                break
+        if keep:
+            filtered_boxes.append(box)
+
+    # Draw the filtered boxes on the image
+    squares = []
+    for box in filtered_boxes:
+        x, y, w, h = box
+        cv2.rectangle(output, (x, y), (x+w, y+h), (0, 255,255), 2)
+
+        center_x = x + w // 2
+        center_y = y + h // 2
+        # diameter =( w // 2 ) -2 # or h, since it's approximately a square  #kkanet ( w // 2 ) wkanet temchi m3a kamel les pdf li semouhoum for upwork
+        #moraha seyit nrod diameter static tema daymen nafs el valeur mechi 3la hsab wach ydetecti l program wmchat bien 
+        diameter =11
+        # diameter=diameter-3#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        squares.append((center_x, center_y, diameter))
+    
+    return output, squares
+
+def transform_string(input_str):
+    # Check if the string is in the format "number-number"
+    if '-' in input_str:
+        # Split the string by '-'
+        parts = input_str.split('-')
+        # Check if both parts are numeric
+        if parts[0].isdigit() and parts[1].isdigit():
+            # Format the string as requested
+            return f"{parts[0]}.-{parts[1]} "
+        else:
+            return input_str
+    else:
+        return input_str
+#type 2 pages:
+def page1_type2(image_org,noise, plure, skewed,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 1------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+        output_image=image_org.copy()
+
+        thresh_check_ratio=150#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+        Date_ROI=detect_word_location_p1(image_org,'DATE:',85)
+        if Date_ROI:
+            x1,y1,x2,y2=Date_ROI[0]
+            roi=x1,y1,x2,y2
+            # print(y2-y1)
+            Date_text=extract_text_from_roi_line(image_org,roi)
+
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            print('Date text:',Date_text)
+            Date=transform_date(Date_text.replace('.',''))
+            print('Date :',Date)
+            excel_inputs["E140"] = Date
+        else:
+            print('cannot detect the date')
+
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+        # Image.fromarray(thresh_check).show()
+        output_image, boxes = detect_checkboxes_p1_t2(thresh_check,output_image)
+
+        # Image.fromarray(output_image).show()
+
+
+        x, y, w, h = boxes[0]
+        # type2
+        x1,y1,x2,y2 =x+70, y+50, x+w-80, y+80
+        print (y2-y1)
+        if y2-y1>25:
+            y2=y1+25
+
+        box=x1,y1,x2,y2
+        Priority_text=extract_text_from_roi_line(image_org,box)
+        cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+        priority_value = determine_priority_value(Priority_text)
+        if priority_value:
+            print('priority:',priority_value)
+            excel_inputs["B14"] = priority_value
+        else:
+            Priority_number=extract_numbers_from_roi(image_org,box)
+            priority_value = determine_priority_value(str(Priority_number))
+            if priority_value:
+                print('priority:',priority_value)
+                excel_inputs["B14"] = priority_value
+            else:
+                box=x1+17,y1,x1+27,y2
+                Priority_number=extract_number_from_roi(image_org,box)
+                if Priority_number=='4':
+                    priority_value = determine_priority_value('1')
+                if priority_value:
+                    print('priority:',priority_value)
+                    excel_inputs["B14"] = priority_value
+                else:
+                    print('cannot detect the priority')
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print("*the program was not able to continue reading the page 1 of this pdf!*")
+    else:
+        return excel_inputs
+#kanet 18 f type 1
+def page11_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 11------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:    
+        # image_org=image_preparation(image_org, plure=True)
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+
+        thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+
+        output_image= image_org.copy()
+
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+        output_image, boxes = detect_Total_aria_t2(thresh_check,output_image)
+
+        # Image.fromarray(output_image).show()
+
+        x, y, w, h = boxes[0]
+        x1,y1,x2,y2 =x+4, y+9, x+w-60, y+h-9
+        cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+        box=x1,y1,x2,y2
+        Total_text=extract_numbers_from_roi(image_org,box)
+        print('Total_text:',Total_text)
+        # Image.fromarray(output_image).show()
+        if Total_text not in ['0','1','2','3','4','5','6','7','8','9','10']:
+            output_image, squares = detect_checkboxes_p11_t2(thresh_check,output_image)
+            filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
+            if filled_check_buttons:
+                filled_count = len(filled_check_buttons)
+                print("number of marked boxes",filled_count)
+                total=filled_count
+            else:
+                print("No filled button detected.")
+                total=0
+        else:
+            total=int(Total_text)
+
+        print(f"FALL RISKS TOTAL: {total}")
+        excel_inputs['F65']=total
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print("*the program was not able to continue reading the page 11 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page13_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 13------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+        thresh_check_ratio=170
+
+        filled_check_ratio=0.6
+        #ratio ta3 tol w 3ard el ROIs ta3 koul button
+        x_check_ratio=14
+        y_check_ratio=6
+
+
+        output_image= image_org.copy()
+
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+
+        output_image, squares = detect_checkboxes_p13_t2(thresh_check,output_image)
+        #page 9----------------------
+        filled_check_buttons_number,output_image = detect_filled_button_p22(thresh_check,squares,output_image,filled_check_ratio)
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+        if filled_check_buttons_number:
+            print('***************************Risk for Hospitalization***********************************************************')
+            excel_inputs = map_numbers_to_cells(filled_check_buttons_number)
+            print(excel_inputs)
+        else:
+            print("No filled button detected.")
+
+
+    except:
+        print("*the program was not able to continue reading the page 13 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page23_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 23------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+        thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+        filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 tol w 3ard el ROIs ta3 koul button
+        x_check_ratio=30
+        y_check_ratio=6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+
+
+        output_image= image_org.copy()
+
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+
+        output_image, squares = detect_checkboxes_p23_t2(thresh_check,output_image)
+
+        filled_check_buttons,output_image = detect_filled_button_p35(thresh_check,squares,output_image,filled_check_ratio)
+
+        if  filled_check_buttons:
+            output_image, roi_check_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+
+            print('********************************check_text*************************************************************')
+            detected_check_text= extract_text_from_roi_checks(image_org, roi_check_coordinates)# detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+
+
+
+            options = ["Bath bench", "Cane", "Walker", "Wheelchair", "Grab Bars", "Hospital Bed", "commode"]
+            validated_options = validate_option(detected_check_text,options,80)
+            if validated_options!=None:
+                
+                # Mapping of numbers to Excel cells
+                option_to_cell_map = {
+                    "Bath bench": 'J55',
+                    "Cane": 'J53',
+                    "Walker": 'J54',
+                    "Wheelchair": 'J57',
+                    "Grab Bars": 'J56',
+                    "Hospital Bed": 'J59',
+                    "commode": 'J58',  
+                    }
+
+                excel_inputs = {option_to_cell_map[option]: 1 for option in validated_options}
+                print(excel_inputs)
+
+            else :
+                print('nothing selected')
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print("*the program was not able to continue reading the page 23 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page16_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 16------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+        thresh_check_ratio=200#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+        x_check_ratio=30
+        y_check_ratio=6
+
+        output_image= image_org.copy()
+
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+
+        #hight:
+        Height_ROI=detect_word_location0_p16_t2(image_org,'Height:',100)
+        if Height_ROI:
+            x1,y1,x2,y2=Height_ROI[0]
+            roi=x1,y1,x2,y2
+            # print(y2-y1)
+            Height_number=extract_numbers_from_roi(image_org,roi)
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            print('Height:',Height_number)
+            excel_inputs['I8']=Height_number
+        else:
+            Other_text=''
+            print("cannot detect the word Height:")
+
+        #Weight:
+        Weight_ROI=detect_word_location0_p16_t2(image_org,'Weight:',100)
+        if Weight_ROI:
+            x1,y1,x2,y2=Weight_ROI[0]
+            roi=x1,y1,x2,y2
+            # print(y2-y1)
+            Weight_number=extract_numbers_from_roi(image_org,roi)
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            print('Weight:',Weight_number)
+            excel_inputs['H8']=Weight_number
+        else:
+            Other_text=''
+            print("cannot detect the word Weight:")
+
+
+        #guid2
+        output_image, squares = detect_checkboxes_p16_t2(thresh_check,output_image)
+        filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
+
+        if filled_check_buttons:
+            output_image, roi_check_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+            print('********************************check_text*************************************************************')
+            detected_check_text= extract_text_from_roi_checks(image_org, roi_check_coordinates)
+            print('***************************nutritional********************************************************************')
+            nutritional_options = ["Renal", "NPO", "Controlled Carbohydrate", "NAS"]
+            validated_nutritional_options = validate_option(detected_check_text,nutritional_options,80)
+        else:
+            validated_nutritional_options=[]
+            print("No filled button detected.")
+
+        #other:
+        other_ROI=detect_word_location_p16_t2(image_org,'other',410)
+        if other_ROI:
+            x1,y1,x2,y2=other_ROI[0]
+            roi=x1+1,y1,x2,y2
+            # print(y2-y1)
+            Other_text=extract_text_from_roi(image_org,roi)
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            print('Other:',Other_text)
+        else:
+            Other_text=''
+            print("cannot detect the word other")
+        # Nutritional requirements (diet):
+        requirements_ROI=detect_phrase_location_p25(image_org, 'Nutritional requirements', 480)
+        if requirements_ROI:
+            x1,y1,x2,y2=requirements_ROI[0]
+            roi=x1,y1,x2,y2
+            requirements_text=extract_text_from_roi(image_org,roi)
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            print('Nutritional requirements (diet):',requirements_text)
+        else:
+            requirements_ROI=detect_phrase_location_p25(image_org, 'Nutritionalrequirements', 480)
+            if requirements_ROI:
+                x1,y1,x2,y2=requirements_ROI[0]
+                roi=x1,y1,x2,y2
+                requirements_text=extract_text_from_roi(image_org,roi)
+                cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+                print('Nutritional requirements (diet):',requirements_text)
+            else:
+                requirements_text=''
+                print("cannot detect the phrase Nutritional requirements (diet):")
+
+        unique_options=[]
+
+        # Check if Other_text and requirements_text are the same using fuzz library
+        if fuzz.ratio(Other_text.lower(), requirements_text.lower()) >= 80 :
+            # If they are the same, use only one of them
+            unique_options = validated_nutritional_options + [Other_text.lower()]
+        else:
+            unique_options = validated_nutritional_options + [Other_text.lower(), requirements_text.lower()]
+
+        # Remove duplicates and any empty strings
+        unique_options = list(filter(None, unique_options))
+        # Use join_strings function to join all the options
+        final_diet_text = join_strings(unique_options)
+
+        if not final_diet_text:
+            final_diet_text='regular'
+
+        if not final_diet_text.endswith(" diet") and final_diet_text!='':
+            final_diet_text += " diet"
+
+
+        print('nutritional status: ',final_diet_text.lower())
+
+        # Update the excel_inputs dictionary for cell F48
+        excel_inputs['F48'] = final_diet_text.lower()
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print ("*the program was not able to continue reading the page 16 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page15_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 15------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+
+        thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        thresh_radio_ratio=140#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
+        #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+        filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 tol w 3ard el ROIs ta3 koul button
+        x_check_ratio=30
+        y_check_ratio=5#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+        x_radio_ratio=30
+        y_radio_ratio=6
+
+        output_image=image_org.copy()
+
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        thresh_radio = preprocess_image(output_image,thresh_radio_ratio)
+        thresh_check = preprocess_image(output_image,thresh_check_ratio)
+
+        output_image, squares = detect_checkboxes_p15_t2(thresh_check,output_image)
+        output_image, circles = detect_radio_buttons_p15_t2(thresh_radio,output_image)
+
+        filled_check_buttons,output_image = detect_filled_button_p24(thresh_check,squares,output_image,filled_check_ratio)
+        filled_radio_buttons,output_image = detect_filled_button_p24(thresh_check,circles,output_image,filled_radio_ratio)
+
+        if filled_radio_buttons :
+            output_image, roi_coordinates = extract_text_roi_p24(output_image, filled_radio_buttons,x_radio_ratio,y_radio_ratio)
+
+        elif filled_check_buttons:
+            output_image, roi_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+
+            detected_radio_text,detected_radio_yesNo= extract_text_from_roi_radios_p24(image_org, roi_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+
+
+            print('********************************Cough *************************************************************')
+            
+            options=['Productive','Non-productive']
+            validated_radio_text=validate_option(detected_radio_text,options)
+            # Check the conditions and update excel_inputs['B56'] accordingly
+            cough_status = detected_radio_yesNo.get('Cough', '')  # Default to empty string if 'Cough' is not in the dict
+            if cough_status == 'No':
+                excel_inputs['B56'] = ''
+            elif cough_status == 'Yes' or (validated_radio_text and 'Productive' in validated_radio_text) or (validated_radio_text and 'Non-productive' in validated_radio_text):
+                if validated_radio_text and 'Productive' in validated_radio_text:
+                    excel_inputs['B56'] = 'PRODUCTIVE COUGH'
+                elif validated_radio_text and 'Non-productive' in validated_radio_text:
+                    excel_inputs['B56'] = 'NON-PRODUCTIVE COUGH'
+                else:
+                    excel_inputs['B56'] = 'COUGH'
+                print(excel_inputs['B56'])
+
+
+            print('********************************intermittent/continuous*************************************************************')
+            
+            options2=['intermittent','continuous']
+            validated_radio_text2=validate_option(detected_radio_text,options2)
+            if validated_radio_text2 and 'intermittent' in validated_radio_text2:
+                excel_inputs['B59'] = 'intermittent'
+            elif validated_radio_text2 and 'continuous' in validated_radio_text2:
+                excel_inputs['B59'] = 'continuous'
+        else:
+            print("No filled button detected.")
+
+        O2_ROI=detect_word_location2_p15_t2(image_org,'LPM',40)
+        if O2_ROI:
+            x1,y1,x2,y2=O2_ROI[0]
+            # print(x2-x1)
+            if x2-x1<60:
+                x1=x1-130
+            elif x2-x1<155:
+                x1=x1-60
+            roi=x1,y1,x2,y2-4
+            O2_text=extract_text_from_roi(image_org,roi)
+            if '@' not in O2_text:
+                x1=x1-60
+                roi=x1,y1,x2,y2
+                O2_text=extract_text_from_roi(image_org,roi)
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            # print('O2 text:',O2_text)
+            # regular expression pattern to match text between "O2@" and "LPM"
+            pattern = r'@\s*(.*?)\s*LPM'
+
+            # find matches in the string
+            match = re.search(pattern, O2_text)
+
+            # if a match is found, extract the text
+            if match:
+                extracted_O2_text = match.group(1).replace('_','')
+                print('O2 text:',extracted_O2_text)
+                excel_inputs['C59']=extracted_O2_text
+            else:
+                print('there is nothing in o2@')
+        else:
+            print('cannot detect the word LPM')
+
+        print('********************************circulation*************************************************************')
+
+        output_image, table_circles = detect_radio_buttons2_p15_t2(thresh_radio,output_image)
+        positions = []
+        if len(table_circles)>25:
+            table_filled_buttons,output_image = detect_filled_button_p24(thresh_check,table_circles,output_image,filled_radio_ratio)
+            if table_filled_buttons:
+                # Step 1: Sort the circles based on the x position
+                sorted_circles = sorted(table_circles, key=lambda circle: circle[0])
+
+                # Step 2 and 3: Divide the list into groups of 5 and sort each group based on y position
+                final_sorted_circles = []
+                for i in range(0, len(sorted_circles), 5):
+                    group = sorted(sorted_circles[i:i+5], key=lambda circle: circle[1])
+                    final_sorted_circles.extend(group)
+
+                # Step 3: Extracting the position (row, column) of each circle in the given list
+                
+                for circle in table_filled_buttons:
+                    index = final_sorted_circles.index(circle)
+                    row = (index % 5) + 1
+                    column = (index // 5) + 1
+                    positions.append((row, column))
+            else:
+                print("No filled button detected.")
+        else:
+            output_image, table_squars = detect_checkboxes2_p15_t2(thresh_radio,output_image)
+            table_filled_buttons,output_image = detect_filled_button_p24(thresh_check,table_squars,output_image,filled_radio_ratio)
+            if table_filled_buttons:
+                # Step 1: Sort the squarss based on the x position
+                sorted_squars = sorted(table_squars, key=lambda squars: squars[0])
+
+                # Step 2 and 3: Divide the list into groups of 5 and sort each group based on y position
+                final_sorted_squars = []
+                for i in range(0, len(sorted_squars), 5):
+                    group = sorted(sorted_squars[i:i+5], key=lambda squars: squars[1])
+                    final_sorted_squars.extend(group)
+
+                # Step 3: Extracting the position (row, column) of each squars in the given list
+                
+                for squars in table_filled_buttons:
+                    index = final_sorted_squars.index(squars)
+                    row = (index % 5) + 1
+                    column = (index // 5) + 1
+                    positions.append((row, column))
+            else:
+                print("No filled button detected.")
+
+            print('marked positions in the table (row, column):',positions)
+
+            # Mapping for rows and columns based on the description
+            row_mapping = {1: '145', 2: '146'}
+            column_mapping = { 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G'}
+
+            # Initialize excel_inputs dictionary
+
+            # Step 4: Iterate through the positions and build the excel_inputs dictionary
+            for row, column in positions:
+                # Skip if the column or row is not in the mapping
+                if column not in column_mapping or row not in row_mapping:
+                    continue
+                # Determine the Excel row and column based on the mapping
+                excel_row = row_mapping[row]
+                excel_column = column_mapping[column]
+
+                # Assign the appropriate value to the cell ('1' or '0')
+                value = '1' if column != 2 else '0'
+                cell = f"{excel_column}{excel_row}"
+
+                # Update the excel_inputs dictionary
+                excel_inputs[cell] = value
+
+            # Check if any row has no markings, and if so, leave the cells empty
+            for row in ['145', '146']:
+                cells = [f"{col}{row}" for col in ['C', 'D', 'E', 'F', 'G']]
+                if not any(cell in excel_inputs for cell in cells):
+                    for cell in cells:
+                        excel_inputs[cell] = ''
+
+            print(excel_inputs)
+
+
+        print('********************************breath sounds*************************************************************')
+
+        line1_ROI=detect_word_location_p24(image_org,'Anterior:',600)
+        line2_ROI=detect_word_location_p24(image_org,'Posterior:',700)
+
+        if line1_ROI:
+            x1,y1,x2,y2=line1_ROI[0]
+            if y2-y1 >40:
+                y1=y1+4
+                y2=y2-10
+            roi=x1+10,y1,x1+150,y2
+            # x11,y11,x22,y22=roi
+            # cv2.rectangle(output_image, (x11, y11), (x22, y22), (255, 0, 255), 2)
+            line1=extract_text_from_roi(image_org,roi)
+            roi=x1+10+250,y1,x2,y2
+            # x11,y11,x22,y22=roi
+            # cv2.rectangle(output_image, (x11, y11), (x22, y22), (255, 0, 255), 2)
+            line1=line1+' '+extract_text_from_roi(image_org,roi)
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            # print('line1 text:',line1.replace('\n',' ').replace('.',' ').replace('_',''))
+        if line2_ROI:
+            x1,y1,x2,y2=line2_ROI[0]
+            if y2-y1 >38:
+                y1=y1+8
+            roi=x1,y1,x2,y2
+            line2=extract_text_from_roi(image_org,roi)
+
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            # print('line2 text:',line2.replace('\n',' ').replace('.',' ').replace('_',''))
+        if line2_ROI:
+            x1,y1,x2,y2=line2_ROI[0]
+            roi=x1,y2+6,x2,y2+40
+            line3=extract_text_from_roi(image_org,roi)
+
+            cv2.rectangle(output_image, (x1, y2+6), (x2, y2+40), (255, 0, 255), 2)
+            # print('line3 text:',line3.replace('\n',' ').replace('.',' ').replace('_',''))
+
+        # Adjusted regular expressions to extract field texts
+        regex = re.compile(r'(Right|Left)(\sUpper|\sLower)?\s*(\w+)')
+
+        # Adjusted Mapping of field texts to cell numbers
+        cell_mapping = {
+            'Right': 'C150',
+            'Left': 'D150',
+            'Right Upper': 'C151',
+            'Left Upper': 'D151',
+            'Right Lower': 'C152',
+            'Left Lower': 'D152'
+        }
+
+        # Extracting field texts and constructing excel_inputs dictionary
+        for i, line in enumerate([line1.replace('\n',' ').replace('.',' ').replace('_',''), line2.replace('\n',' ').replace('.',' ').replace('_',''), line3.replace('\n',' ').replace('.',' ').replace('_','')], start=1):
+            matches = regex.findall(line)
+            for match in matches:
+                field_text = match[2].strip()  # Extracting field text
+                position = f'{match[0]} {match[1].strip()}'.strip()  # Constructing position
+                print(field_text)
+                if field_text.lower() not in ["clear", "c", "cta"]:
+                    cell = cell_mapping.get(position)  # Getting cell number
+                    if cell:
+                        excel_inputs[cell] = field_text.upper()  # Adding to excel_inputs
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print("*the program was not able to continue reading the page 15 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page4_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 4------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+
+        thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        thresh_radio_ratio=110#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
+        #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+        filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 tol w 3ard el ROIs ta3 koul button
+        x_check_ratio=30
+        y_check_ratio=6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+        x_radio_ratio=30
+        y_radio_ratio=6
+
+        output_image= image_org.copy()
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        thresh_check = preprocess_image(output_image,thresh_check_ratio)
+        thresh_radio = preprocess_image(output_image,thresh_radio_ratio)
+
+        output_image, squares = detect_checkboxes_p4_t2(thresh_check,output_image)
+        output_image, circles = detect_radio_buttons_p4_t2(thresh_radio,output_image)
+        
+        filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
+        filled_radio_buttons,output_image = detect_filled_button(thresh_check,circles,output_image,filled_radio_ratio)
+
+        if filled_radio_buttons or filled_check_buttons:
+            output_image, roi_check_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+            # output_image, roi_radio_coordinates = extract_text_roi(output_image, filled_radio_buttons,x_radio_ratio,y_radio_ratio)
+
+            print('********************************radio_text*************************************************************')
+            detected_sleep_text,detected_rest_text= extract_text_from_roi_radios_p4_t2(image_org, roi_check_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+            print('********************************check_text*************************************************************')
+            detected_check_text= extract_text_from_roi_checks(image_org, roi_check_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+            # ***************************Spiritual_resource*************************************************************
+            print('***************************Spiritual_resource***********************************************************')
+            Spiritual_resource_ROI=detect_word_location2_p4_t2(image_org,'Spiritual',300,75)#75 ta3 threshold lazem tkoun 75 bah ydetecti Spiritual daymen koun 80 kayen pdf ma ye9rahach 
+            if len(Spiritual_resource_ROI)!=0:
+                x1,y1,x2,y2=Spiritual_resource_ROI[0]
+                cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+                Spiritual_resource=extract_text_from_roi(image_org,Spiritual_resource_ROI[0],True)
+                print(f"Spiritual resource: {Spiritual_resource}")
+                excel_inputs['I32']=Spiritual_resource
+
+            
+            # ***************************Feelings/emotions*************************************************************
+            print('***************************Feelings/emotions***********************************************************')
+            Feelings_emotions_options = ["Angry","Fear","Sadness","Discouraged","Lonely","Depressed","Helpless","Content","Happy","Hopeful","Motivated"]
+            validated_Feelings_options = validate_option(detected_check_text,Feelings_emotions_options,80)
+            #Other:
+            
+            other_ROI=detect_word_location_p4_t2(image_org,'other',300)
+
+            x1,y1,x2,y2=other_ROI[0]
+            if y2-y1>28:
+                y=int(y1+(y2-y1)/2)
+                y1=y-14
+                y2=y+14
+            roi=x1,y1,x2,y2
+            Other_text=extract_text_from_roi(image_org,roi)
+
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+            print('Other:',Other_text)
+            if Other_text=='' and validated_Feelings_options!=None:
+                Feelings_emotions= join_strings(validated_Feelings_options)
+                print(f"Feelings/emotions: {Feelings_emotions}")
+                excel_inputs['I43']=Feelings_emotions
+            elif validated_Feelings_options!=None:
+                validated_Feelings_options.append(Other_text)
+                Feelings_emotions= join_strings(validated_Feelings_options)
+                print(f"Feelings/emotions: {Feelings_emotions}")
+                excel_inputs['I43']=Feelings_emotions
+            elif Other_text!='':
+                Feelings_emotions=Other_text
+                print(f"Feelings/emotions: {Feelings_emotions}")
+                excel_inputs['I43']=Feelings_emotions
+            else:
+                print('nothing selected for Feelings/emotions')
+
+            # ***************************sleep and rest *************************************************************
+            print('***************************sleep*************************************************************')
+            sleep_options = ["Adequate", "Inadequate"]
+            validated_sleep_options = validate_option(detected_sleep_text,sleep_options,95)
+            if validated_sleep_options!=None :
+                sleep = validated_sleep_options[0]
+            else :
+                sleep = 'NONE'
+                print('nothing selected for sleeping')
+            print(f"sleep: {sleep}")
+            excel_inputs['I39']=sleep
+            print('***************************rest*************************************************************')
+            rest_options = ["Adequate", "Inadequate"]
+            validated_rest_options = validate_option(detected_rest_text,rest_options,95)
+            if validated_rest_options!=None :
+                sleep = validated_rest_options[0]
+            else :
+                sleep = 'NONE'
+                print('nothing selected for sleeping')
+            print(f"rest: {sleep}")
+            excel_inputs['I40']=sleep
+
+            # ***************************Frequency of naps*************************************************************
+            print('***************************Frequency of naps***********************************************************')
+            Frequency_of_naps_ROI=detect_word_location0_p4_t2(image_org,'Frequency',180)
+            if len(Frequency_of_naps_ROI)!=0:
+                x1,y1,x2,y2=Frequency_of_naps_ROI[0]
+                cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+                Frequency_of_naps=transform_string(extract_text_from_roi(image_org,Frequency_of_naps_ROI[0]))
+                print(f"Frequency_of_naps: {Frequency_of_naps}")
+                excel_inputs['I42']=Frequency_of_naps
+            else:
+                excel_inputs['I42']=None
+            # ***************************hours slept per night*************************************************************
+            print('***************************hours slept per night***********************************************************')
+            hours_slept_per_night_ROI=detect_word_location1_p4_t2(image_org,'slept',90)
+            if len(hours_slept_per_night_ROI)!=0:
+                x1,y1,x2,y2=hours_slept_per_night_ROI[0]
+                cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
+                hours_slept_per_night=transform_string(extract_text_from_roi_line(image_org,hours_slept_per_night_ROI[0]))
+                print(f"hours slept per night: {hours_slept_per_night}")
+                excel_inputs['I41']=hours_slept_per_night
+            else:
+                excel_inputs['I41']=None
+
+
+            # ***************************Feelings/emotions*************************************************************
+            print('***************************inability********************************************************************')
+            inability_options = ["Lack of motivation","Inability to recognize problems","Unrealistic expectations","Denial of problems"]
+            validated_inability_options = validate_option(detected_check_text,inability_options,80)
+            if validated_inability_options!=None:
+                inability= join_strings(validated_inability_options)
+                print(f"inability: {inability}")
+                excel_inputs['I44']=inability
+            else:
+                print('nothing selected for inability')
+        else:
+            print("No filled button detected.")
+        if show_imgs:
+            Image.fromarray(output_image).show()
+    except:
+        print("*the program was not able to continue reading the page 4 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page19_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 19------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    # try:
+    image_org=image_preparation(image_org,noise, plure, skewed)
+
+    thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+    thresh_radio_ratio=110#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
+    #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+    filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
+    filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+    #ratio ta3 tol w 3ard el ROIs ta3 koul button
+    x_check_ratio=30
+    y_check_ratio=6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+    x_radio_ratio=10
+    y_radio_ratio=6
+
+    output_image=image_org.copy()
+
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    thresh_check = preprocess_image(output_image,thresh_check_ratio)
+    thresh_radio = preprocess_image(output_image,thresh_radio_ratio)
+
+    output_image, squares = detect_checkboxes_p19_t2(thresh_check,output_image)
+    output_image, circles = detect_radio_buttons_p19_t2(thresh_radio,output_image)
+
+    filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
+    filled_radio_buttons,output_image = detect_filled_button(thresh_check,circles,output_image,filled_radio_ratio)
+    if filled_radio_buttons or filled_check_buttons:
+        output_image, roi_check_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+        output_image, roi_radio_coordinates = extract_text_roi(output_image, filled_radio_buttons,x_radio_ratio,y_radio_ratio)
+
+        print('********************************radio_text*************************************************************')
+        detected_radio_text,detected_radio_yesNo= extract_text_from_roi_radios(image_org, roi_radio_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+        print('********************************check_text*************************************************************')
+        detected_check_text= extract_text_from_roi_checks(image_org, roi_check_coordinates) # detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+        excel_inputs={}
+        IMMUNIZATIONS_options = ["Influenza","Hepatitis C","Pneumonia","Tetanus","Shingles","initial vaccine series","Yes", "No"]
+        validated_checkboxe_options = validate_option(detected_check_text,IMMUNIZATIONS_options,80)
+        booster_options = ["Ist","1st", "2nd", "3rd", "4th", "5th", "Yes", "No"]
+        validated_radio_options = validate_option(detected_radio_text,booster_options,80)
+
+        # Initialize the content for E8
+        e8_content = []
+
+        # Check for specific conditions and update e8_content accordingly
+        if (validated_checkboxe_options and 'Influenza' in validated_checkboxe_options and validated_radio_options and 'No' not in validated_radio_options) or (validated_radio_options and 'Yes' in validated_radio_options)      or      (validated_checkboxe_options and 'Influenza' in validated_checkboxe_options and 'No' not in validated_checkboxe_options) or (validated_checkboxe_options and 'Yes' in validated_checkboxe_options):
+            e8_content.append('INFLUENZA')
+        # Check for other vaccine types
+        for vaccine in ['Hepatitis C', 'Pneumonia', 'Tetanus', 'Shingles']:
+            if validated_checkboxe_options and vaccine in validated_checkboxe_options:
+                e8_content.append(vaccine.upper())
+
+        # Check for COVID-19 vaccination details
+        if 'initial vaccine series' in validated_checkboxe_options:
+            covid_content = 'COVID-19 INITIAL VACCINE SERIES'
+            for booster in ['1st', '2nd', '3rd', '4th', '5th']:
+                if validated_radio_options and booster in validated_radio_options:
+                    covid_content += f" WITH {booster.upper()} BOOSTER"
+                    break
+            e8_content.append(covid_content)
+        else:
+            for booster in ['1st', '2nd', '3rd', '4th', '5th']:
+                if validated_radio_options and booster in validated_radio_options:
+                    e8_content.append(f"{booster.upper()} COVID BOOSTER")
+
+
+        if e8_content != []:
+            # Join the content using the provided method
+            VACCINATIONS=join_strings(e8_content).upper()
+        else:
+            VACCINATIONS=None
+        excel_inputs['E8']= VACCINATIONS.upper()
+        print("VACCINATIONS:",VACCINATIONS)
+
+    else:
+        print("No filled button detected.")
+
+
+    if show_imgs:
+        Image.fromarray(output_image).show()
+
+
+    # except:
+    #     print("*the program was not able to continue reading the page 19 of this pdf!*")
+    # else:
+    return excel_inputs
+
+def page3_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 3------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+        thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 tol w 3ard el ROIs ta3 koul button
+        x_check_ratio=30
+        y_check_ratio=6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+        output_image= image_org.copy()
+
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+
+        output_image, squares = detect_checkboxes_p3_t2(thresh_check,output_image)
+
+        filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
+
+        if  filled_check_buttons:
+            output_image, roi_check_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+
+            print('********************************check_text*************************************************************')
+            detected_check_text= extract_text_from_roi_checks(image_org, roi_check_coordinates)# detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+
+
+            options = ["Memory deficit", "Impaired decision making", "Disruptive behaviors", "verbal", "physical", "Delusional", "Paranoid behaviors", "None of these behaviors demonstrated"]
+            validated_options = validate_option(detected_check_text,options,80)
+            if validated_options!=None:
+
+                # Setting values for each condition
+                excel_inputs['G56'] = "1" if "Memory deficit" in validated_options else ""
+                excel_inputs['G57'] = "1" if "Impaired decision making" in validated_options else ""
+                excel_inputs['G58'] = "1" if "verbal" in validated_options else ""
+                excel_inputs['G59'] = "1" if "physical" in validated_options else ""
+                excel_inputs['G60'] = "1" if "Disruptive behaviors" in validated_options else ""
+
+                # For Delusional or Paranoid Behaviors
+                if "Delusional" in validated_options or "Paranoid behaviors" in validated_options:
+                    excel_inputs['G61'] = "1"
+                else:
+                    excel_inputs['G61'] = ""
+                print(excel_inputs)
+
+            else :
+                excel_inputs['G56'] = ""
+                excel_inputs['G57'] = ""
+                excel_inputs['G58'] = ""
+                excel_inputs['G59'] = ""
+                excel_inputs['G60'] = ""
+                excel_inputs['G61'] = ""
+                print('nothing selected')
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print("*the program was not able to continue reading the page 3 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page2_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 2------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+        thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 tol w 3ard el ROIs ta3 koul button
+        x_check_ratio=35
+        y_check_ratio=6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+
+        output_image= image_org.copy()
+
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+
+        output_image, squares = detect_checkboxes_p2_t2(thresh_check,output_image)
+
+        filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
+
+        if  filled_check_buttons:
+            output_image, roi_check_coordinates = extract_text_roi(output_image, filled_check_buttons,x_check_ratio,y_check_ratio)
+
+            print('********************************check_text*************************************************************')
+            detected_check_text= extract_text_from_roi_checks_p2_t2(image_org, roi_check_coordinates)# detrt image_org fel fct bah ya9ra txt men img li ma rsamnach fiha lakhaterch ki rsamna ghatina 3la l harf lewel mel kelma
+
+
+            options = ["An order for Advance Directives", "Do Cardiopulmonary Resuscitation (CPR)", "Do Not Intubate Order (DNI)", "Medical/Durable Power of Attorney Name", "Financial Power of Attorney Name", "Delusional", "Living Will", "Do Not Resuscitate Order (DNR)", "No Artificial Nutrition and Hydration"]
+            validated_options = validate_option_p2_t2(detected_check_text,options,80)
+            if validated_options!=None:
+                if any(option in validated_options for option in ["An order for Advance Directives", "Do Cardiopulmonary Resuscitation (CPR)", "Do Not Intubate Order (DNI)", "Medical/Durable Power of Attorney Name", "Financial Power of Attorney Name", "Living Will", "Do Not Resuscitate Order (DNR)", "No Artificial Nutrition and Hydration"]):
+                    excel_inputs['H11'] = "Patient has advanced directive"
+                else:
+                    excel_inputs['H11'] = ""
+
+                # Check for specific conditions for cell 'J11', selecting the first valid option
+                if "Do Cardiopulmonary Resuscitation (CPR)" in validated_options:
+                    excel_inputs['J11'] = "CPR"
+                elif "Do Not Intubate Order (DNI)" in validated_options:
+                    excel_inputs['J11'] = "DNI"
+                elif "Do Not Resuscitate Order (DNR)" in validated_options:
+                    excel_inputs['J11'] = "DNR"
+                elif any(option in validated_options for option in ["Medical/Durable Power of Attorney Name", "Financial Power of Attorney Name"]):
+                    excel_inputs['J11'] = "POWER OF ATTORNEY"
+                elif "Living Will" in validated_options:
+                    excel_inputs['J11'] = "LIVING WILL"
+                elif "No Artificial Nutrition and Hydration" in validated_options:
+                    excel_inputs['J11'] = "NO ARTIFICIAL NUTRITION AND HYDRATION"
+
+            else :
+                excel_inputs['H11'] = ""
+                print('nothing selected')
+            print(excel_inputs)
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print("*the program was not able to continue reading the page 2 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page12_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 12------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+
+        thresh_check_ratio=170#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        thresh_radio_ratio=110#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
+        #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
+        filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
+        filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
+        #ratio ta3 tol w 3ard el ROIs ta3 koul button
+
+        output_image=image_org.copy()
+
+        #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        thresh_check = preprocess_image(output_image,thresh_check_ratio)
+        thresh_radio = preprocess_image(output_image,thresh_radio_ratio)
+
+        output_image, squares = detect_checkboxes_p12_t2(thresh_check,output_image)
+        output_image, circles = detect_radio_buttons_p12_t2(thresh_radio,output_image)
+        
+        filled_check_buttons,output_image = detect_filled_button(thresh_check,squares,output_image,filled_check_ratio)
+        filled_radio_buttons,output_image = detect_filled_button(thresh_check,circles,output_image,filled_radio_ratio)
+
+        if filled_radio_buttons or filled_check_buttons:
+            excel_inputs['F53']="Incontinent"
+        else:
+            excel_inputs['F53']="No Incontinance"
+        print("INCONTINANCE:",excel_inputs['F53'])
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+
+    except:
+        print("*the program was not able to continue reading the page 12 of this pdf!*")
+    else:
+        return excel_inputs
+
+def page14_type2(image_org,noise, plure, skewed ,show_imgs):
+    print('------------------------------------------------------------------------------------------------------page 14------------------------------------------------------------------------------------------------------')
+    excel_inputs={}
+    try:
+        image_org=image_preparation(image_org,noise, plure, skewed)
+
+        output_image= image_org.copy()
+
+        #-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        thresh_check_ratio=170
+
+        thresh_check = preprocess_image(image_org,thresh_check_ratio)
+        # Image.fromarray(thresh_check).show()
+        output_image, boxes = detect_checkboxes_p22p2(thresh_check,output_image)
+        # Image.fromarray(output_image).show()
+
+        if len(boxes)!=3:
+            # print('cannot detect the sites, I will now try to smouth the lines :')
+            thresh_check = preprocess_image_and_smouth_lines(image_org,thresh_check_ratio)
+            # Image.fromarray(thresh_check).show()
+            output_image, boxes = detect_checkboxes_p22p2(thresh_check,output_image)
+            # Image.fromarray(output_image).show()
+
+        if len(boxes)==3:
+            x, y, w, h = boxes[0]
+            x1,y1,x2,y2 =x+2, y+3, x+w-2, y+h-3
+
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 0), 2)
+            box=x1,y1,x2,y2
+            site1_text=extract_text_from_roi_p22p2(image_org,box)
+            site1_text=site1_text.replace('‘','')
+            print('site1:',site1_text)
+
+
+            x, y, w, h = boxes[1]
+            x1,y1,x2,y2 =x+2, y+3, x+w-2, y+h-3
+
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            box=x1,y1,x2,y2
+            site2_text=extract_text_from_roi_p22p2(image_org,box)
+            site2_text=site2_text.replace('‘','')
+            print('site2:',site2_text)
+
+            
+            x, y, w, h = boxes[2]
+            x1,y1,x2,y2 =x+2, y+3, x+w-2, y+h-3
+
+            cv2.rectangle(output_image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            box=x1,y1,x2,y2
+            site3_text=extract_text_from_roi_p22p2(image_org,box)
+            site3_text=site3_text.replace('‘','')
+            print('site3:',site3_text)
+
+
+
+            # Assuming you've already gotten the values for site1_text, site2_text, and site3_text
+            PAIN_ASSESSMENT = format_site_texts(site1_text, site2_text, site3_text)
+
+            # Update the Excel sheet
+            
+            print(f"PAIN ASSESSMENT: {PAIN_ASSESSMENT}")
+            excel_inputs['H20'] = PAIN_ASSESSMENT
+        else:
+            print('cannot detect the three sites')
+
+        if show_imgs:
+            Image.fromarray(output_image).show()
+
+    except:
+        print("*the program was not able to continue reading the page 14 of this pdf!*")
+    else:
+        return excel_inputs
+
 import sys
 import os
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit, QFileDialog, QCheckBox, QDialog
@@ -3555,101 +5754,170 @@ class ScanThread(QThread):
 
         # Your scanning logic will be placed here.
         # For simplicity, I'm distributing the progress equally across pages.
-        progress_steps = 100 / 18  
+        progress_steps = 100 / 17
         current_progress = 0
         self.progress_signal.emit(1)
+        if self.app.pdf_type == "comprehensive":
+            print('pdf type 1 selected')
+            p1_excel_inputs = page1(np.array(all_pages[0]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p1_excel_inputs = page1(np.array(all_pages[0]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p4_excel_inputs = page4(np.array(all_pages[3]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p4_excel_inputs = page4(np.array(all_pages[3]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p5_excel_inputs = page5(np.array(all_pages[4]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p5_excel_inputs = page5(np.array(all_pages[4]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p6_excel_inputs = page6(np.array(all_pages[5]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p6_excel_inputs = page6(np.array(all_pages[5]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p6p2_excel_inputs = page6p2(np.array(all_pages[5]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p6p2_excel_inputs = page6p2(np.array(all_pages[5]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p9_excel_inputs = page9(np.array(all_pages[8]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p9_excel_inputs = page9(np.array(all_pages[8]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p10_excel_inputs = page10(np.array(all_pages[9]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p10_excel_inputs = page10(np.array(all_pages[9]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p18_excel_inputs = page18(np.array(all_pages[17]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p18_excel_inputs = page18(np.array(all_pages[17]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p19_excel_inputs = page19(np.array(all_pages[18]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p19_excel_inputs = page19(np.array(all_pages[18]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p22_excel_inputs = page22(np.array(all_pages[21]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p22_excel_inputs = page22(np.array(all_pages[21]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p22p2_excel_inputs = page22p2(np.array(all_pages[21]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p22p2_excel_inputs = page22p2(np.array(all_pages[21]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p24_excel_inputs = page24(np.array(all_pages[23]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p24_excel_inputs = page24(np.array(all_pages[23]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p24p2_excel_inputs = page24p2(np.array(all_pages[23]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p24p2_excel_inputs = page24p2(np.array(all_pages[23]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p25_excel_inputs = page25(np.array(all_pages[24]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p25_excel_inputs = page25(np.array(all_pages[24]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            p35_excel_inputs = page35(np.array(all_pages[34]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        p35_excel_inputs = page35(np.array(all_pages[34]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
-        current_progress += progress_steps
-        self.progress_signal.emit(int(current_progress))
+            excel_inputs = {}
+            if p1_excel_inputs:
+                excel_inputs.update(p1_excel_inputs)
+            if p4_excel_inputs:
+                excel_inputs.update(p4_excel_inputs)
+            if p5_excel_inputs:
+                excel_inputs.update(p5_excel_inputs)
+            if p6_excel_inputs:
+                excel_inputs.update(p6_excel_inputs)
+            if p6p2_excel_inputs:
+                excel_inputs.update(p6p2_excel_inputs)
+            if p9_excel_inputs:
+                excel_inputs.update(p9_excel_inputs)
+            if p10_excel_inputs:
+                excel_inputs.update(p10_excel_inputs)
+            if p18_excel_inputs:
+                excel_inputs.update(p18_excel_inputs)
+            if p19_excel_inputs:
+                excel_inputs.update(p19_excel_inputs)
+            if p22_excel_inputs:
+                excel_inputs.update(p22_excel_inputs)
+            if p22p2_excel_inputs:
+                excel_inputs.update(p22p2_excel_inputs)
+            if p24_excel_inputs:
+                excel_inputs.update(p24_excel_inputs)
+            if p24p2_excel_inputs:
+                excel_inputs.update(p24p2_excel_inputs)
+            if p25_excel_inputs:
+                excel_inputs.update(p25_excel_inputs)
+            if p35_excel_inputs:
+                excel_inputs.update(p35_excel_inputs)
+        else:
+            print('pdf type 2 selected')
+            progress_steps = 100 / 14
+            p1_excel_inputs = page1_type2(np.array(all_pages[0]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p2_excel_inputs = page2_type2(np.array(all_pages[1]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p3_excel_inputs = page3_type2(np.array(all_pages[2]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p4_excel_inputs = page4_type2(np.array(all_pages[3]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p11_excel_inputs = page11_type2(np.array(all_pages[10]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p12_excel_inputs = page12_type2(np.array(all_pages[11]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p13_excel_inputs = page13_type2(np.array(all_pages[12]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            #l9it beli l page 14 type 2 hiya nafsha l page 22p2 tema sta3meltha bark fel arg meditelha page 14 mechi 22
+            p14_excel_inputs = page14_type2(np.array(all_pages[13]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p15_excel_inputs = page15_type2(np.array(all_pages[14]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p16_excel_inputs = page16_type2(np.array(all_pages[15]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p19_excel_inputs = page19_type2(np.array(all_pages[18]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
+            p23_excel_inputs = page23_type2(np.array(all_pages[22]), self.app.denoising, self.app.sharpen, self.app.correcting_skew, self.app.show_imgs)
+            current_progress += progress_steps
+            self.progress_signal.emit(int(current_progress))
 
-        excel_inputs = {}
-        if p1_excel_inputs:
-            excel_inputs.update(p1_excel_inputs)
-        if p4_excel_inputs:
-            excel_inputs.update(p4_excel_inputs)
-        if p5_excel_inputs:
-            excel_inputs.update(p5_excel_inputs)
-        if p6_excel_inputs:
-            excel_inputs.update(p6_excel_inputs)
-        if p6p2_excel_inputs:
-            excel_inputs.update(p6p2_excel_inputs)
-        if p9_excel_inputs:
-            excel_inputs.update(p9_excel_inputs)
-        if p10_excel_inputs:
-            excel_inputs.update(p10_excel_inputs)
-        if p18_excel_inputs:
-            excel_inputs.update(p18_excel_inputs)
-        if p19_excel_inputs:
-            excel_inputs.update(p19_excel_inputs)
-        if p22_excel_inputs:
-            excel_inputs.update(p22_excel_inputs)
-        if p22p2_excel_inputs:
-            excel_inputs.update(p22p2_excel_inputs)
-        if p24_excel_inputs:
-            excel_inputs.update(p24_excel_inputs)
-        if p24p2_excel_inputs:
-            excel_inputs.update(p24p2_excel_inputs)
-        if p25_excel_inputs:
-            excel_inputs.update(p25_excel_inputs)
-        if p35_excel_inputs:
-            excel_inputs.update(p35_excel_inputs)
+
+            excel_inputs = {}
+            if p1_excel_inputs:
+                excel_inputs.update(p1_excel_inputs)
+            if p2_excel_inputs:
+                excel_inputs.update(p2_excel_inputs)
+            if p3_excel_inputs:
+                excel_inputs.update(p3_excel_inputs)
+            if p4_excel_inputs:
+                excel_inputs.update(p4_excel_inputs)
+            if p11_excel_inputs:
+                excel_inputs.update(p11_excel_inputs)
+            if p12_excel_inputs:
+                excel_inputs.update(p12_excel_inputs)
+            if p13_excel_inputs:
+                excel_inputs.update(p13_excel_inputs)
+            if p14_excel_inputs:
+                excel_inputs.update(p14_excel_inputs)
+            if p15_excel_inputs:
+                excel_inputs.update(p15_excel_inputs)
+            if p16_excel_inputs:
+                excel_inputs.update(p16_excel_inputs)
+            if p19_excel_inputs:
+                excel_inputs.update(p19_excel_inputs)
+            if p23_excel_inputs:
+                excel_inputs.update(p23_excel_inputs)
+
 
         widget_to_excel = {
  'J13': self.app.visionJ13,
@@ -3912,7 +6180,6 @@ class ScanThread(QThread):
  'E139': self.app.line_editE139,
  'E140': self.app.line_editE140}
 
-
         start_time = time.time()
         print ('opening the exel sheet...')
         app = xw.App(visible=False)  # Set visible to True if you want to see Excel open
@@ -3967,7 +6234,6 @@ class ScanThread(QThread):
 
         wb.close()
         app.quit()
-        current_progress += progress_steps
         self.progress_signal.emit(int(current_progress))
         end_time = time.time()
         print ('closing the exel sheet...')
@@ -5460,13 +7726,14 @@ class choosePdfThread(QThread):
     progress_signal = pyqtSignal(int)
     finished_loading = pyqtSignal()
     finished_rendering = pyqtSignal()
+    finished_preparing = pyqtSignal()
     request_display = pyqtSignal()
 
-    def __init__(self, viewer, file_path):
+    def __init__(self,app, viewer, file_path):
         super().__init__()
         self.viewer = viewer
         self.file_path = file_path
-
+        self.app=app
     def run(self):
         self.progress_signal.emit(33)
         self.load_pdf()
@@ -5475,14 +7742,32 @@ class choosePdfThread(QThread):
         self.render_pdf()
         self.progress_signal.emit(100)
         self.finished_rendering.emit()
+        self.prepare_pdf()
+        self.progress_signal.emit(100)
+        self.finished_preparing.emit()
         self.request_display.emit()
         self.progress_signal.emit(0)
+
+        first_page=pdf_to_image(self.file_path,0)
+        roi_coordinate=1000,80,1650,270
+        pdf_type_text=extract_text_from_roi(first_page,roi_coordinate)
+        # cv2.rectangle(first_page, (1000, 80), (1650,270), (0, 255,255), 2)
+        # print('---------',pdf_type_text)
+        # Image.fromarray(first_page).show()
+        if fuzz.partial_ratio(pdf_type_text, 'COMPREHENSIVE') >= 80:
+            self.app.pdf_type="comprehensive"
+        else:
+            self.app.pdf_type="recertification"
+
 
     def load_pdf(self):
         self.viewer.pdf = fitz.open(self.file_path)
 
     def render_pdf(self):
         self.viewer.render_pdf()
+    
+    def prepare_pdf(self):
+        self.viewer.prepare_pdf()
 
 class chooseExcelThread(QThread):
     progress_signal = pyqtSignal(int)
@@ -5795,11 +8080,11 @@ class chooseExcelThread(QThread):
 class PDFViewer(QWidget):
     def __init__(self):
         super().__init__()
-        self.zoom_factor = 0.7
+        self.zoom_factor = 0.46
         self.pdf = None
 
         layout = QVBoxLayout(self)
-
+        self.qt_image=None
         # Graphics View and Scene
         self.view = QGraphicsView(self)
         layout.addWidget(self.view)
@@ -5842,6 +8127,7 @@ class PDFViewer(QWidget):
         
         images = []
         zoom=200//72
+        # zoom=4
         for page_num in range(len(self.pdf)):
             page = self.pdf[page_num]
             zoom_matrix = fitz.Matrix(zoom,zoom)
@@ -5859,22 +8145,26 @@ class PDFViewer(QWidget):
             self.stitched_image.paste(img, (0, y_offset))
             y_offset += img.height
 
-    def display_pdf(self):
-        self.scene.clear()
-        scaled_width = int(self.stitched_image.width * self.zoom_factor)
-        scaled_height = int(self.stitched_image.height * self.zoom_factor)
-        scaled_image = self.stitched_image.resize((scaled_width, scaled_height), Image.LANCZOS)
 
+
+    def prepare_pdf(self):
+        scaled_width = int(self.stitched_image.width * 1)
+        scaled_height = int(self.stitched_image.height * 1)
+        scaled_image = self.stitched_image.resize((scaled_width, scaled_height), Image.LANCZOS)
         # Convert the PIL image to JPEG format
         buffered = BytesIO()
-        scaled_image.save(buffered, format="JPEG")
+        scaled_image.save(buffered, format="PNG")
         jpeg_data = buffered.getvalue()
 
         # Convert the JPEG data to QImage
-        qt_image = QImage.fromData(jpeg_data)
+        self.qt_image = QImage.fromData(jpeg_data)
 
-        if not qt_image.isNull():
-            pixmap = QPixmap.fromImage(qt_image)
+    def display_pdf(self):
+        scaled_width = int(self.stitched_image.width * 1)
+        scaled_height = int(self.stitched_image.height * 1)
+        self.scene.clear()
+        if not self.qt_image.isNull():
+            pixmap = QPixmap.fromImage(self.qt_image)
             self.scene.addPixmap(pixmap)
             self.view.setSceneRect(0, 0, scaled_width, scaled_height)
             self.apply_zoom()
@@ -5924,7 +8214,7 @@ class App(QWidget):
         self.restarting=False
         self.scaning=False
         self.updating=False
-
+        self.pdf_type = "comprehensive"
         # Set Font to Segoe UI
         font = QFont("Calibri", 14)  # Using Segoe UI font
         self.setFont(font)
@@ -5968,7 +8258,7 @@ class App(QWidget):
         # The widget that will contain all the input fields and their labels
         inputs_widget = QWidget()
         form_layout = QFormLayout()  # Form layout for the labels and inputs
-        MAX_WIDTH = 200  
+        MAX_WIDTH = 500  
         MAX_WIDTH_LINEEDIT =100
         # POC TYPE ComboBox
 
@@ -6028,7 +8318,7 @@ QLabel { background-color: orange;
         
         self.templateA5 = WheelIgnoredComboBox()
         self.templateA5.setMaximumWidth(MAX_WIDTH)
-        self.templateA5.addItems(['BASIC', 'DM', 'DM/INSULIN', 'CHF', 'CHF/COPD', 'DM/CHF/COPD', 'DM/COPD', 'DM/CHF', 'DM/COPD', 'COPD/DM/INSULIN', 'CHF/DM/INSULIN', 'CHF/COPD & DM/INSULIN', 'COPD/O2'])
+        self.templateA5.addItems(['BASIC', 'DM', 'DM/INSULIN', 'CHF','COPD', 'CHF/COPD', 'DM/CHF/COPD', 'DM/COPD','DM/CHF' , 'COPD/DM/INSULIN', 'CHF/DM/INSULIN', 'CHF/COPD & DM/INSULIN', 'COPD/O2'])
         
         self.musculoskeletalE5 = WheelIgnoredComboBox()
         self.musculoskeletalE5.setMaximumWidth(MAX_WIDTH)
@@ -6094,7 +8384,7 @@ QLabel { background-color: orange;
         self.snv_frequencyB8.addItems(['2wx2, 1wx7', '1wx1, 2wx2, 1wx6', '2wx1, 1wx8', '1wx1, 2wx1, 1wx7', 'Once a Day x 10 Days, 1wx7'])
         self.line_editE8 = QLineEdit(self)
         self.line_editE8.setFont(line_edit_font)
-        self.line_editE8.setMaximumWidth(200)
+        self.line_editE8.setMaximumWidth(MAX_WIDTH)
         hight_wight = QHBoxLayout()
         self.line_editH8 = QLineEdit(self)
         self.line_editH8.setFont(line_edit_font)
@@ -6156,10 +8446,10 @@ QLabel { background-color: orange;
 
         self.pt_or_notB11 = WheelIgnoredComboBox()
         self.pt_or_notB11.setMaximumWidth(MAX_WIDTH)
-        self.pt_or_notB11.addItems(['NONE', 'PT', 'OT', 'PT&OT', 'CHHA PT&CHHA', 'OT&CHHA', 'PT, OT, &CHHA'])
+        self.pt_or_notB11.addItems(['NONE', 'PT', 'OT', 'PT&OT', 'CHHA', 'PT&CHHA', 'OT&CHHA', 'PT, OT, &CHHA'])
         self.line_editE11 = QLineEdit(self)
         self.line_editE11.setFont(line_edit_font)
-        self.line_editE11.setMaximumWidth(200)
+        self.line_editE11.setMaximumWidth(MAX_WIDTH)
         row = QHBoxLayout()
         row.addWidget(self.pt_or_notB11, 1)  # Stretch factor of 1
         row.addWidget(self.line_editE11, 1)          # Stretch factor of 1
@@ -6307,7 +8597,7 @@ QLabel { background-color: orange;
 
         self.line_editB17 = QLineEdit(self)
         self.line_editB17.setFont(line_edit_font)
-        self.line_editB17.setMaximumWidth(200)
+        self.line_editB17.setMaximumWidth(MAX_WIDTH)
         RISK = QHBoxLayout()
         self.line_editE17 = QLineEdit(self)
         self.line_editE17.setFont(line_edit_font)
@@ -6468,7 +8758,7 @@ QLabel { background-color: orange;
 
         self.line_editB23 = QLineEdit(self)
         self.line_editB23.setFont(line_edit_font)
-        self.line_editB23.setMaximumWidth(200)
+        self.line_editB23.setMaximumWidth(MAX_WIDTH)
         label1 = QLabel("")
         EXTRA = QHBoxLayout()
         self.line_editH23 = QLineEdit(self)
@@ -7059,9 +9349,9 @@ QLabel { background-color: orange;
 
         self.line_editB53 = QLineEdit(self)
         self.line_editB53.setFont(line_edit_font)
-        self.line_editB53.setMaximumWidth(200)
+        self.line_editB53.setMaximumWidth(MAX_WIDTH)
         self.incontinanceF53 = WheelIgnoredComboBox()
-        self.incontinanceF53.setMaximumWidth(200)
+        self.incontinanceF53.setMaximumWidth(MAX_WIDTH)
         self.incontinanceF53.addItems(['Incontinent', 'No Incontinance'])
         DME = QHBoxLayout()
         self.line_editI53 = QLineEdit(self)
@@ -7127,7 +9417,7 @@ QLabel { background-color: orange;
 
 
         self.line_editB56 = QLineEdit(self)
-        self.line_editB56.setMaximumWidth(200)
+        self.line_editB56.setMaximumWidth(MAX_WIDTH)
         self.line_editB56.setFont(line_edit_font)
         INCO = QHBoxLayout()
         self.line_editF56 = QLineEdit(self)
@@ -7309,7 +9599,7 @@ QLabel { background-color: red;
 
 
         self.edemaB62 = WheelIgnoredComboBox()
-        self.edemaB62.setMaximumWidth(200)
+        self.edemaB62.setMaximumWidth(MAX_WIDTH)
         self.edemaB62.addItems([None,'+1', '+2', '+3', '+4', 'non-pitting', 'localized', 'localized non-pitting', 'localized +1', 'localized +2', 'localized +3', 'localized +4'])
         label1 = QLabel("")
         DME = QHBoxLayout()
@@ -7360,17 +9650,17 @@ QLabel { background-color: red;
 
 
         self.sopB65 = WheelIgnoredComboBox()
-        self.sopB65.setMaximumWidth(200)
+        self.sopB65.setMaximumWidth(MAX_WIDTH)
         self.sopB65.addItems(['Moderate', 'Minimal', '20 feet', 'NONE', 'At rest'])
         self.line_editF65 = QLineEdit(self)
-        self.line_editF65.setMaximumWidth(200)
+        self.line_editF65.setMaximumWidth(MAX_WIDTH)
         self.line_editF65.setFont(line_edit_font)
         self.line_editF65.setStyleSheet("""
 QLineEdit { background-color: yellow;
     }
 """)
         self.line_editI65 = QLineEdit(self)
-        self.line_editI65.setMaximumWidth(200)
+        self.line_editI65.setMaximumWidth(MAX_WIDTH)
         self.line_editI65.setFont(line_edit_font)
         row = QHBoxLayout()
         row.addWidget(self.sopB65,1)
@@ -7407,7 +9697,7 @@ QLabel { background-color: red;
 
         self.line_editI70 = QLineEdit(self)
         self.line_editI70.setFont(line_edit_font)
-        form_layout.addRow("MEDICATION NAME               ",self.line_editI70)
+        form_layout.addRow("MEDICATION NAME",self.line_editI70)
         label = form_layout.labelForField(self.line_editI70)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -7442,7 +9732,7 @@ QLabel { background-color: red;
 
         self.line_editI74 = QLineEdit(self)
         self.line_editI74.setFont(line_edit_font)
-        form_layout.addRow("CREAM ORDER                      ",self.line_editI74)
+        form_layout.addRow("CREAM ORDER",self.line_editI74)
         label = form_layout.labelForField(self.line_editI74)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -7475,7 +9765,7 @@ QLabel { background-color: red;
 
         self.line_editI78 = QLineEdit(self)
         self.line_editI78.setFont(line_edit_font)
-        form_layout.addRow("CLONIDINE ORDER                 ",self.line_editI78)
+        form_layout.addRow("CLONIDINE ORDER",self.line_editI78)
         label = form_layout.labelForField(self.line_editI78)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -7509,14 +9799,14 @@ QLabel { background-color: red;
 
         self.line_editI82 = QLineEdit(self)
         self.line_editI82.setFont(line_edit_font)
-        form_layout.addRow("SQ INJECTION ORDER            ",self.line_editI82)
+        form_layout.addRow("SQ INJECTION ORDER",self.line_editI82)
         label = form_layout.labelForField(self.line_editI82)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
 
         self.line_editI83 = QLineEdit(self)
         self.line_editI83.setFont(line_edit_font)
-        form_layout.addRow("MEDICATION NAME               ",self.line_editI83)
+        form_layout.addRow("MEDICATION NAME",self.line_editI83)
         label = form_layout.labelForField(self.line_editI83)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -7552,13 +9842,13 @@ QLabel { background-color: red;
 
         self.line_editI87 = QLineEdit(self)
         self.line_editI87.setFont(line_edit_font)
-        form_layout.addRow("ANTIBIOTIC ORDER               ",self.line_editI87)
+        form_layout.addRow("ANTIBIOTIC ORDER",self.line_editI87)
         label = form_layout.labelForField(self.line_editI87)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editI88 = QLineEdit(self)
         self.line_editI88.setFont(line_edit_font)
-        form_layout.addRow("ANTIBIOTIC NAME                 ",self.line_editI88)
+        form_layout.addRow("ANTIBIOTIC NAME",self.line_editI88)
         label = form_layout.labelForField(self.line_editI88)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -7619,7 +9909,7 @@ QLabel { background-color: orange;
         row = QHBoxLayout()
         row.addWidget(self.line_editI93,1)
         row.addWidget(self.line_editJ93,1)
-        form_layout.addRow("EYE MEDICATION ORDER      ",row)
+        form_layout.addRow("EYE MEDICATION ORDER",row)
         label = form_layout.labelForField(row)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -7631,7 +9921,7 @@ QLabel { background-color: orange;
         row = QHBoxLayout()
         row.addWidget(self.line_editI94,1)
         row.addWidget(self.line_editJ94,1)
-        form_layout.addRow("MEDICATION NAME               ",row)
+        form_layout.addRow("MEDICATION NAME",row)
         label = form_layout.labelForField(row)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -7716,8 +10006,8 @@ QLabel { background-color: purple;
         form_layout.addRow(row)
 
 
-        label1 = QLabel("                 ")
-        label2 = QLabel("                 ")
+        label1 = QLabel("")
+        label2 = QLabel("")
         self.cmF105 = WheelIgnoredComboBox()
         self.cmF105.setMaximumWidth(130)
         self.cmF105.addItems(['cm', 'in'])
@@ -7822,7 +10112,6 @@ QLabel { background-color: orange;
         row.addWidget(self.line_editI107,1)
         row.addWidget(self.line_editJ107,1)
         form_layout.addRow(row)
-
 
 
         label1 = QLabel("SIZE")
@@ -7975,8 +10264,6 @@ QLineEdit { background-color: yellow;
         form_layout.addRow(row)
 
 
-
-
         label1 = QLabel("WIDTH")
         label1.setStyleSheet("""
 QLabel { background-color: yellow;
@@ -8041,8 +10328,6 @@ QLineEdit { background-color: yellow;
         form_layout.addRow(row)
 
 
-
-        
         label1 = QLabel("                                 ")
         label2 = QLabel("SITE#1")
         label2.setStyleSheet("""
@@ -8078,7 +10363,6 @@ QLabel { background-color: white;
         row.addWidget(label6,1)
         form_layout.addRow(row)
 
-
         label1 = QLabel("                                 ")
         self.line_editE115 = QLineEdit(self)
         self.line_editE115.setFont(line_edit_font)
@@ -8103,8 +10387,6 @@ QLabel { background-color: white;
         row.addWidget(self.line_editH115,1)
         row.addWidget(self.line_editI115,1)
         form_layout.addRow(row)
-
-
 
         label1 = QLabel("WOUND CARE ORDER")
         label1.setStyleSheet("""
@@ -8144,7 +10426,7 @@ QLabel { background-color: orange;
 
         self.line_editE118 = QLineEdit(self)
         self.line_editE118.setFont(line_edit_font)
-        form_layout.addRow("DERMATITIS LOCATION         ",self.line_editE118)
+        form_layout.addRow("DERMATITIS LOCATION",self.line_editE118)
         label = form_layout.labelForField(self.line_editE118)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -8176,19 +10458,19 @@ QLabel { background-color: purple;
         form_layout.addRow(row)
 
 
-        label1 = QLabel("SHUNT LOCATION & TYPE     ")
+        label1 = QLabel("SHUNT LOCATION & TYPE")
         label1.setStyleSheet("""
 QLabel { background-color: orange;
          font-weight: bold; }
 """)
         self.line_editE122 = QLineEdit(self)
         self.line_editE122.setFont(line_edit_font)
-        self.line_editE122.setMaximumWidth(135)
+        self.line_editE122.setMaximumWidth(MAX_WIDTH)
         self.SHUNTtypeG122 = WheelIgnoredComboBox()
-        self.SHUNTtypeG122.setMaximumWidth(135)
+        self.SHUNTtypeG122.setMaximumWidth(MAX_WIDTH)
         self.SHUNTtypeG122.addItems(['SHUNT', 'Catheter'])
         self.SHUNTlocaI122 = WheelIgnoredComboBox()
-        self.SHUNTlocaI122.setMaximumWidth(135)
+        self.SHUNTlocaI122.setMaximumWidth(MAX_WIDTH)
         self.SHUNTlocaI122.addItems(['left', 'right'])
         row = QHBoxLayout()
         row.addWidget(label1,1)
@@ -8200,7 +10482,7 @@ QLabel { background-color: orange;
 
         self.line_editE123 = QLineEdit(self)
         self.line_editE123.setFont(line_edit_font)
-        form_layout.addRow("DIALYSIS DAYS                   ",self.line_editE123)
+        form_layout.addRow("DIALYSIS DAYS",self.line_editE123)
         label = form_layout.labelForField(self.line_editE123)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -8234,25 +10516,25 @@ QLabel { background-color: purple;
 
         self.line_editE127 = QLineEdit(self)
         self.line_editE127.setFont(line_edit_font)
-        form_layout.addRow("IV LOCATION                         ",self.line_editE127)
+        form_layout.addRow("IV LOCATION",self.line_editE127)
         label = form_layout.labelForField(self.line_editE127)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE128 = QLineEdit(self)
         self.line_editE128.setFont(line_edit_font)
-        form_layout.addRow("IV MEDICATION ORDER         ",self.line_editE128)
+        form_layout.addRow("IV MEDICATION ORDER",self.line_editE128)
         label = form_layout.labelForField(self.line_editE128)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE129 = QLineEdit(self)
         self.line_editE129.setFont(line_edit_font)
-        form_layout.addRow("IV MEDICATION NAME           ",self.line_editE129)
+        form_layout.addRow("IV MEDICATION NAME",self.line_editE129)
         label = form_layout.labelForField(self.line_editE129)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE130 = QLineEdit(self)
         self.line_editE130.setFont(line_edit_font)
-        form_layout.addRow("IV SITE CARE ORDER             ",self.line_editE130)
+        form_layout.addRow("IV SITE CARE ORDER",self.line_editE130)
         label = form_layout.labelForField(self.line_editE130)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -8287,43 +10569,43 @@ QLabel { background-color: purple;
 
         self.line_editE134 = QLineEdit(self)
         self.line_editE134.setFont(line_edit_font)
-        form_layout.addRow("SOC Date                             ",self.line_editE134)
+        form_layout.addRow("SOC Date",self.line_editE134)
         label = form_layout.labelForField(self.line_editE134)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE135 = QLineEdit(self)
         self.line_editE135.setFont(line_edit_font)
-        form_layout.addRow("Admission Date                   ",self.line_editE135)
+        form_layout.addRow("Admission Date",self.line_editE135)
         label = form_layout.labelForField(self.line_editE135)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE136 = QLineEdit(self)
         self.line_editE136.setFont(line_edit_font)
-        form_layout.addRow("DC Date                               ",self.line_editE136)
+        form_layout.addRow("DC Date",self.line_editE136)
         label = form_layout.labelForField(self.line_editE136)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE137 = QLineEdit(self)
         self.line_editE137.setFont(line_edit_font)
-        form_layout.addRow("Weeks Remaining                ",self.line_editE137)
+        form_layout.addRow("Weeks Remaining",self.line_editE137)
         label = form_layout.labelForField(self.line_editE137)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE138 = QLineEdit(self)
         self.line_editE138.setFont(line_edit_font)
-        form_layout.addRow("Days Remaining                   ",self.line_editE138)
+        form_layout.addRow("Days Remaining",self.line_editE138)
         label = form_layout.labelForField(self.line_editE138)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE139 = QLineEdit(self)
         self.line_editE139.setFont(line_edit_font)
-        form_layout.addRow("Hospital Name                      ",self.line_editE139)
+        form_layout.addRow("Hospital Name",self.line_editE139)
         label = form_layout.labelForField(self.line_editE139)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
         self.line_editE140 = QLineEdit(self)
         self.line_editE140.setFont(line_edit_font)
-        form_layout.addRow("ROC Date                             ",self.line_editE140)
+        form_layout.addRow("ROC Date",self.line_editE140)
         label = form_layout.labelForField(self.line_editE140)
         if label:
             label.setStyleSheet("background-color: orange; font-weight: bold;")
@@ -8770,7 +11052,7 @@ QLabel { background-color: orange;
             }
 
             QComboBox::down-arrow {
-                image: url(:/arrow.png); /* Replace with your own image */
+                image: url(arrow.png); /* Replace with your own image */
                 width: 10px; /* or any size that fits well in your combo box */
                 height: 10px;
                 border-radius: 5px;
@@ -8859,12 +11141,13 @@ QLabel { background-color: orange;
 
     def load_into_viewer(self, file_path):
         try:
-            self.choose_pdf_thread = choosePdfThread(self.pdf_viewer, file_path)
+            self.choose_pdf_thread = choosePdfThread(self,self.pdf_viewer, file_path)
 
             # Connect signals to slots for updates
             self.choose_pdf_thread.progress_signal.connect(self.update_progress)
             self.choose_pdf_thread.finished_loading.connect(lambda: print("PDF Loaded"))
             self.choose_pdf_thread.finished_rendering.connect(lambda: print("PDF Rendered"))
+            self.choose_pdf_thread.finished_preparing.connect(lambda: print("PDF prepared"))
             self.choose_pdf_thread.request_display.connect(self.display_in_main_thread)
 
             self.choose_pdf_thread.start()
@@ -8921,11 +11204,16 @@ QLabel { background-color: orange;
 
     def open_settings(self):
         settings_dialog = SettingsDialog(self)
+        # Pass the current pdf_type to the settings dialog
+        settings_dialog.set_pdf_type(self.pdf_type)
         if settings_dialog.exec_():
+            # Update settings from the dialog
             self.denoising = settings_dialog.chk_denoising.isChecked()
             self.sharpen = settings_dialog.chk_sharpen.isChecked()
             self.correcting_skew = settings_dialog.chk_correcting_skew.isChecked()
             self.show_imgs = settings_dialog.chk_show_imgs.isChecked()
+            # Get the selected PDF type from the dialog
+            self.pdf_type = settings_dialog.get_pdf_type()
 
     def set_paragraph_text1(self, value):
         self.text_area1.setText(value)
@@ -9038,6 +11326,8 @@ QLabel { background-color: orange;
 
 from PyQt5.QtCore import QSize
 
+from PyQt5.QtWidgets import QRadioButton, QButtonGroup
+
 class SettingsDialog(QDialog):
 
     def __init__(self, parent=None):
@@ -9047,6 +11337,35 @@ class SettingsDialog(QDialog):
         self.setFont(font)
         self.setWindowTitle("Settings")
         layout = QVBoxLayout()
+
+        # Add PDF Type Radio Buttons
+        self.pdf_type_group = QButtonGroup(self)
+        self.radio_recertification = QRadioButton("RECERTIFICATION/FOLLOW-UP ASSESSMENT", self)
+        self.radio_comprehensive_assessment = QRadioButton("COMPREHENSIVE ADULT NURSING ASSESSMENT", self)
+        self.apply_radio_style(self.radio_recertification)
+        self.apply_radio_style(self.radio_comprehensive_assessment)
+        # Add the radio buttons to the button group
+        
+        self.pdf_type_group.addButton(self.radio_comprehensive_assessment)
+        self.pdf_type_group.addButton(self.radio_recertification)
+        # Check the radio button based on the parent's selection, if you have a variable for this
+        # Assuming you have a variable in the parent named `pdf_type`
+        if parent.pdf_type == "recertification":
+            self.radio_recertification.setChecked(True)
+        elif parent.pdf_type == "comprehensive":
+            self.radio_comprehensive_assessment.setChecked(True)
+
+        # Create a layout for the radio buttons
+        pdf_type_layout = QVBoxLayout()
+        pdf_type_label = QLabel("PDF Type:")
+        pdf_type_layout.addWidget(pdf_type_label)
+        pdf_type_layout.addWidget(self.radio_comprehensive_assessment)
+        pdf_type_layout.addWidget(self.radio_recertification)
+        # Add the PDF type layout to the main layout
+        layout.addLayout(pdf_type_layout)
+
+
+
 
         self.chk_denoising = QCheckBox("Denoising", self)
         self.chk_denoising.setChecked(parent.denoising)
@@ -9061,14 +11380,14 @@ class SettingsDialog(QDialog):
         self.apply_checkbox_style(self.chk_sharpen)
         self.apply_checkbox_style(self.chk_correcting_skew)
         self.apply_checkbox_style(self.chk_show_imgs)
-
+        pdf_type_label = QLabel("scanning:")
         layout.addWidget(self.chk_denoising)
         layout.addWidget(self.chk_sharpen)
         layout.addWidget(self.chk_correcting_skew)
         layout.addWidget(self.chk_show_imgs)
 
         btn_save = QPushButton("Save", self)
-        btn_save.setFixedSize(320, 45)  # Adjust button size
+        btn_save.setFixedSize(800, 45)  # Adjust button size
         save_font = QFont("Calibri", 18)  # Larger font for Save button
         btn_save.setFont(save_font)
         btn_save.clicked.connect(self.accept)
@@ -9076,11 +11395,30 @@ class SettingsDialog(QDialog):
         self.setLayout(layout)
         self.apply_dark_theme()
 
+    def set_pdf_type(self, pdf_type):
+        if pdf_type == "recertification":
+            self.radio_recertification.setChecked(True)
+        elif pdf_type == "comprehensive":
+            self.radio_comprehensive_assessment.setChecked(True)
+
+    def get_pdf_type(self):
+        if self.radio_recertification.isChecked():
+            return "recertification"
+        elif self.radio_comprehensive_assessment.isChecked():
+            return "comprehensive"
+        return "comprehensive"   
+
     def apply_checkbox_style(self, checkbox):
         """Apply styling to the checkbox."""
         checkbox_font = QFont("Calibri", 20)  # Bigger font for checkbox
         checkbox.setFont(checkbox_font)
-        checkbox.setIconSize(QSize(32, 32))  # Bigger checkbox icon
+        checkbox.setIconSize(QSize(64, 64))  # Bigger checkbox icon
+    
+    def apply_radio_style(self, radio):
+        """Apply styling to the checkbox."""
+        radio_font = QFont("Calibri", 20)  # Bigger font for checkbox
+        radio.setFont(radio_font)
+        radio.setIconSize(QSize(64, 64))  # Bigger checkbox icon
 
     def apply_dark_theme(self):
         # Set dark palette
@@ -9113,6 +11451,10 @@ class SettingsDialog(QDialog):
                 width: 2px;
             }
 
+            QRadioButton {
+                color: #707070;
+            }
+
             QCheckBox {
                 color: #707070;
             }
@@ -9123,6 +11465,7 @@ class SettingsDialog(QDialog):
             }
 
             QLabel{
+                font-size:35px;
                 color:#707070;
                 
             }

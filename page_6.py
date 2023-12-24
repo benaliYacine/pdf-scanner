@@ -517,7 +517,9 @@ def extract_numbers_from_roi(image_org, roi_coordinate):
     roi_image = image_org[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
     # denoised = cv2.fastNlMeansDenoisingColored(roi_image, None,1, 1, 7, 21)
     # Image.fromarray(denoised).show()
-    number = pytesseract.image_to_string(roi_image, config='--psm 6 ').strip()
+
+
+    number = pytesseract.image_to_string(roi_image, config='--psm 7').strip()
     return number
 
 def validate_option(detected_text, options, threshold=80):
@@ -689,9 +691,47 @@ def update_dentures_cell(validated_DENTURES_options):
     # Update the excel_inputs dictionary
     
 
+
+
+def template_match(scanned_image, template_image):
+    # Apply template matching
+    res = cv2.matchTemplate(scanned_image, template_image, cv2.TM_CCOEFF_NORMED)
+    # Get the maximum match value
+    _, max_val, _, _ = cv2.minMaxLoc(res)
+    return max_val
+
+def compare_with_references(scanned_roi, ref_2,ref_0):
+    if len(scanned_roi.shape) > 2:
+        scanned_roi = preprocess_image(scanned_roi,200)
+    # mask = cv2.bitwise_not(scanned_roi)
+    # scanned_roi = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGRA)
+    # scanned_roi[:, :, 3] = mask
+    Image.fromarray(scanned_roi).show()
+    if len(ref_2.shape) > 2:
+        ref_2 = preprocess_image(ref_2,200)
+    # mask = cv2.bitwise_not(ref_2)
+    # ref_2 = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGRA)
+    # ref_2[:, :, 3] = mask
+    Image.fromarray(ref_2).show()
+    if len(ref_0.shape) > 2:
+        ref_0 = preprocess_image(ref_0,200)
+    # mask = cv2.bitwise_not(ref_2)
+    # ref_2 = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGRA)
+    # ref_2[:, :, 3] = mask
+    Image.fromarray(ref_0).show()
+
+
+    score_2 = template_match(scanned_roi, ref_2)
+    score_0 = template_match(scanned_roi, ref_0)
+
+    if score_2 > score_0:
+        return 2, score_2
+    else:
+        return 0, score_0
+
 if __name__ == "__main__":
     start_time = time.time()
-    for pdf_path in ['HIGH_QUALITY_3.pdf','BAD_QUALITY.pdf','BAD_QUALITY_3.pdf','BAD_QUALITY.pdf','FILLABLES_2.pdf','FILLABLES_3.pdf','FILLABLES_4.pdf','FILLABLES_5.pdf','FOR_UPWORK_#1.pdf','FOR_UPWORK_#2.pdf','FOR_UPWORK_#3.pdf','FOR_UPWORK_#4.pdf','HIGH_QUALITY_2.pdf','HIGH_QUALITY_3.pdf','HIGH_QUALITY.pdf','MEDIUM_QUALITY.pdf']:
+    for pdf_path in ['ISSUE PDF FOR VIS HEAR 3.pdf']:
 # 'FILLABLE-9.pdf','BAD_QUALITY_2.pdf','BAD_QUALITY_3.pdf',
         
         input('press enter to start')
@@ -715,7 +755,7 @@ if __name__ == "__main__":
         thresh_lines_ratio=120
 
 
-        thresh_radio_ratio=100#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
+        thresh_radio_ratio=110#kanet 120 bekri w kanet temchi m3a kamel les pdf li semouhom for upwork
         #ratio ta3 dettection ta3 li filled modifier 3liha lima tehtej 0.1 ma3naha yel9a ghi 10% mel button black y acceptih filled. 0.9 ma3nah lawem 90% mel button black bah y acceptih filled
         filled_radio_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023kanet 0.4 w kanet temchi m3a kamel les pdf li semouhom for upwork
         filled_check_ratio=0.6#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/5/2023
@@ -788,6 +828,12 @@ if __name__ == "__main__":
             y2=y2-10
         cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
         box=x1,y1,x2,y2
+
+        reference_image_2 = cv2.imread('path_to_ref_image_2.jpg')
+        reference_image_0 = cv2.imread('path_to_ref_image_0.jpg')
+        roi_x_start, roi_y_start, roi_x_end, roi_y_end = box 
+        roi_image = thresh_code[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+
         hearing_text=extract_numbers_from_roi(thresh_code,box)
         # if hearing_text not in ['0','1','2','3','4']:
         #     x1=x1+1
@@ -802,6 +848,8 @@ if __name__ == "__main__":
             hearing_text='2'
         if '3' in hearing_text:
             hearing_text='3'
+        if 'q' in hearing_text:
+            hearing_text='2'
         if 'c' in hearing_text:
             hearing_text='0'
         if 'z' in hearing_text:
@@ -812,16 +860,19 @@ if __name__ == "__main__":
             hearing_text='2'
         if 'a' in hearing_text:
             hearing_text='2'
-        if 'q' in hearing_text:
-            hearing_text='2'
+        # if 'q' in hearing_text: bekri ga3 kout dayerha 0 mais doka l9it rani radha 2 tema balak raw khrejli pdf fih 2 w ye9ra q tema manich sur
+        #     hearing_text='2'
         if hearing_text not in ['0','1','2','3']:
             hearing_text='0'
-        
         
         excel_inputs={}
 
         print('hearing_text:',hearing_text)
 
+
+        if '2' in hearing_text:
+            number, score = compare_with_references(roi_image, reference_image_2,reference_image_0)
+            print(f"Detected Number: {number} with a score of {score}")
 
         if hearing_text in ['0','1','2','3']:
             hearing_number=int(hearing_text)
@@ -840,7 +891,7 @@ if __name__ == "__main__":
         print(f"hearing: {hearing}")
 
         if hearing != "Invalid hearing_number":
-            excel_inputs['B65']=hearing
+            excel_inputs['J14']=hearing
 
     #     #second part------------------------------------------------------------------------
 
@@ -901,6 +952,12 @@ if __name__ == "__main__":
         cv2.rectangle(output_image, (x1, y1), (x2, y2), (255, 0, 255), 2)
         box=x1,y1,x2,y2
 
+        reference_image_2 = cv2.imread('path_to_ref_image_2.jpg')
+        roi_x_start, roi_y_start, roi_x_end, roi_y_end = box 
+        roi_image = thresh_code[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+
+
+
         vision_text=extract_numbers_from_roi(thresh_code,box)
 
         print('vision_text0:',vision_text)
@@ -911,7 +968,8 @@ if __name__ == "__main__":
             vision_text='2'
         if '3' in vision_text:
             vision_text='3'
-        
+        if 'q' in vision_text:
+            vision_text='2'
         if 'c' in vision_text:
             vision_text='0'
         if 'z' in vision_text:
@@ -928,6 +986,11 @@ if __name__ == "__main__":
 
         print('vision_text:',vision_text)
         
+
+        if '2' in vision_text:
+            number, score = compare_with_references(roi_image, reference_image_2,reference_image_0)
+            print(f"Detected Number: {number} with a score of {score}")
+
 
 
         if vision_text in ['0','1','2','3','4']:
